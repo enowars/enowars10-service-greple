@@ -1,0 +1,74 @@
+<div style="display: flex; align-items: center; max-width: 80rem; gap: .5rem">
+  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
+  <h1 style="font-size: 1rem; padding: 2pt; color: white; background: #336699; width: 100%;">Our Search: Search Tips</h1>
+</div>
+<div style="display: flex; gap: .5rem">
+  <div style="width: 12.5rem; font-size: small; padding-top: 1rem">
+    <b>Table of Content</b>
+    <ul style="display: flex; flex-direction: column; gap: .5rem; padding-left: 1.5rem">
+      <li><a href="#basic">Basic Search</a></li>
+      <li><a href="#and">Automatic "and" Queries</a></li>
+      <li><a href="#stopwords">What is a stopword?</a></li>
+      <li><a href="#context">See your search terms in context</a></li>
+      <li><a href="#stemming">Does Greple use stemming?</a></li>
+      <li><a href="#case">Does capitalization matter?</a></li>
+    </ul>
+  </div>
+  <div style="max-width: 67rem">
+    <a name="basic"><b>Basic Search</b></a>
+    <p>To enter a query into Greple, just type in a few descriptive words and
+    hit the 'enter' key (or click on the Greple Search button) for your list of
+    relevant results.</p>
+    <p>Greple uses sophisticated text-matching techniques to find pages that
+    are both important and relevant to your search. For instance, when Greple
+    analyzes a page, it looks at what those pages linking to that page have to
+    say about it. Greple also prefers pages in which your query terms are near
+    each other.</p>
+    <a name="and"><b>Automatic "and" Queries</b></a>
+    <p>By default, Greple only returns those pages that include all of your
+    search terms. There is no need to include "and" between terms.</p>
+    <p>For example, to plan a vacation to Hawaii, simply type</p>
+    <form action="/search">
+      <input name="q" size="40" value="vacation hawaii">
+      <input type="submit" value="Greple Search" name="btnG">
+    </form>
+    <p>To restrict a search further, just include more terms.</p>
+    <p>Greple does support the logical "or" operator. To tell Greple to look
+    for pages containing either word A or word B, use a capitalized 'OR'
+    between terms. For example, to search for a vacation in either London or
+    Paris, just type</p>
+    <form action="/search" style="margin-bottom: 1rem;">
+      <input name="q" size="40" value="vacation london OR paris">
+      <input type="submit" value="Greple Search" name="btnG">
+    </form>
+    <a name="stopwords"><b>Stop Words</b></a>
+    <p>Greple ignores common words and characters, known as stop words. Greple
+    automatically disregards such terms as <em>"where"</em> and <em>"how,"</em>
+    as well as certain single digits and single letters, because these terms
+    rarely help narrow a search, and can slow down searching significantly.</p>
+    <p>Use the "+" sign to include stop words in your search. Be sure to
+    include a space before the "+" sign. You can also include the "+" sign in
+    phrase searches.</p>
+    <p>For example, to search for Star Wars, Episode I:</p>
+    <form action="/search" style="margin-bottom: 1rem;">
+      <input name="q" size="40" value="Episode +I">
+      <input type="submit" value="Greple Search" name="btnG">
+    </form>
+    <a name="context"><b>See your search terms in context</b></a>
+    <p>Each Greple search result contains one or more excerpt from the web
+    page, which shows how your search terms are used in context on that page.
+    Your search terms are bolded so you can tell at a glance whether the result
+    is a page you want to visit.</p>
+    <a name="stemming"><b>Stemming</b></a>
+    <p>To provide the most accurate results, Greple does not use "stemming" or
+    support "wildcard" searches. In other words, Greple searches for exactly
+    the words that you enter in the search box. Searching for "grepl" or
+    "grepl*" will not yield "grepler" or "greplin." If in doubt, try both
+    forms: "airline" and "airlines," for instance.</p>
+    <a name="case"><b>Does capitalization matter?</b></a>
+    <p>Greple searches are <b>not</b> case sensitive. All letters, regardless
+    of how you type them, will be understood as lower case. For example,
+    searches for "george washington", "George Washington", and "gEoRgE
+    wAsHiNgToN" will all return the same results.</p>
+  </div>
+</div>

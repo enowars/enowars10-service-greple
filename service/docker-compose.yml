@@ -1,0 +1,8 @@
+services:
+  greple:
+    build: .
+    ports:
+      - "7777:7777"
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1
