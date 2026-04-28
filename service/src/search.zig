@@ -44,7 +44,7 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
     const time = timer.read();
     std.debug.print("{s}", .{run_result.stderr});
 
-    var filenames = try std.ArrayList([]const u8).initCapacity(alloc, 0);
+    var filenames: std.ArrayList([]const u8) = .empty;
     defer {
         for (filenames.items) |f| alloc.free(f);
         filenames.deinit(alloc);
@@ -58,7 +58,7 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
         try filenames.append(alloc, try alloc.dupe(u8, filename));
     }
 
-    var list = try std.ArrayList(Document).initCapacity(alloc, 0);
+    var list: std.ArrayList(Document) = .empty;
     errdefer list.deinit(alloc);
 
     for (filenames.items) |f| {

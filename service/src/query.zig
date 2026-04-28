@@ -10,9 +10,9 @@ pub const Query = struct {
     exclude: []const u8,
 
     pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
-        var include = try std.ArrayList(u8).initCapacity(alloc, 0);
+        var include: std.ArrayList(u8) = .empty;
         errdefer include.deinit(alloc);
-        var exclude = try std.ArrayList(u8).initCapacity(alloc, 0);
+        var exclude: std.ArrayList(u8) = .empty;
         errdefer exclude.deinit(alloc);
 
         var phrase_it = std.mem.splitScalar(u8, q, ' ');
