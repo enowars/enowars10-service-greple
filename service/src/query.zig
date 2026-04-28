@@ -12,6 +12,9 @@ const seperators = struct {
     }
 }.f(0);
 
+const pattern_start = "^\\(title\\|text\\):\\(\\|.*[^a-zA-Z0-9]\\)";
+const pattern_sep = "\\($\\|[^a-zA-Z0-9]\\+\\)";
+
 pub const Query = struct {
     pub const Kind = enum { include, exclude };
 
@@ -33,9 +36,9 @@ pub const Query = struct {
             var explicit = false;
             var kind: Kind = .include;
 
-            // TODO: directly write to buffer
-            var phrase = try std.ArrayList([]const u8).initCapacity(alloc, p.len);
-            defer phrase.deinit(alloc);
+            var buffer: std.ArrayList(u8) = try .initCapacity(alloc, pattern_start.len + p.len);
+            defer buffer.deinit(alloc);
+            buffer.appendSliceAssumeCapacity(pattern_start);
 
             var word_it = std.mem.splitAny(u8, p, seperators);
             while (word_it.next()) |w| {
@@ -48,23 +51,19 @@ pub const Query = struct {
                     }
                     continue;
                 }
-                phrase.appendAssumeCapacity(w);
-            }
-
-            if (phrase.items.len == 1 and phrase.items[0].len == 1 and !explicit) continue;
-
-            var buffer: std.ArrayList(u8) = .empty;
-            defer buffer.deinit(alloc);
-            try buffer.appendSlice(alloc, "^\\(title\\|text\\):\\(\\|.*[^a-zA-Z0-9]\\)");
-            for (phrase.items) |w| {
                 try buffer.appendSlice(alloc, w);
-                try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]\\+\\)");
+                try buffer.appendSlice(alloc, pattern_sep);
             }
 
-            var pattern = try patterns.addOne(alloc);
-            errdefer _ = patterns.pop();
-            pattern.kind = kind;
-            pattern.pattern = try buffer.toOwnedSlice(alloc);
+            if (buffer.items.len == pattern_start.len + 1 + pattern_sep.len and !explicit) continue;
+
+            const pattern = try buffer.toOwnedSlice(alloc);
+            errdefer alloc.free(pattern);
+
+            try patterns.append(alloc, .{
+                .pattern = pattern,
+                .kind = kind,
+            });
         }
 
         if (patterns.items.len == 0) return null;
