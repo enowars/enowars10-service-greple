@@ -30,31 +30,48 @@ pub fn getIndex(iterate: bool) !std.fs.Dir {
     return std.fs.cwd().openDir("index", .{ .iterate = iterate });
 }
 
+fn grep(alloc: std.mem.Allocator, cwd: std.fs.Dir, patterns: []const u8) !std.mem.SplitIterator(u8, .scalar) {
+    if (patterns.len == 0) return .{
+        .buffer = "",
+        .index = null,
+        .delimiter = '\x00',
+    };
+    const run_result = try std.process.Child.run(.{
+        .allocator = alloc,
+        .argv = &.{ "/bin/grep", "-rli", patterns, "." },
+        .cwd_dir = cwd,
+    });
+    alloc.free(run_result.stderr);
+    return std.mem.splitScalar(u8, run_result.stdout, '\n');
+}
+
 pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
     var index = try getIndex(false);
     defer index.close();
 
-    // TODO: also exclude
     var timer = try std.time.Timer.start();
-    const run_result = try std.process.Child.run(.{
-        .allocator = alloc,
-        .argv = &.{ "/bin/grep", "-rl", q.include, "." },
-        .cwd_dir = index,
-    });
-    defer {
-        alloc.free(run_result.stdout);
-        alloc.free(run_result.stderr);
-    }
+
+    var include_it = try grep(alloc, index, q.include);
+    defer alloc.free(include_it.buffer);
+
+    var exclude_it = try grep(alloc, index, q.exclude);
+    defer alloc.free(exclude_it.buffer);
+
     const time = timer.read();
-    std.debug.print("{s}", .{run_result.stderr});
 
     var list: std.ArrayList(Document) = .empty;
     defer list.deinit(alloc);
 
-    var it = std.mem.splitScalar(u8, run_result.stdout, '\n');
-    while (it.next()) |l| {
-        if (l.len == 0) continue;
-        const file = try index.openFile(l, .{});
+    blk: while (include_it.next()) |i| {
+        if (i.len == 0) continue;
+
+        exclude_it.reset();
+        while (exclude_it.next()) |e| {
+            if (e.len == 0) continue;
+            if (std.mem.eql(u8, i, e)) continue :blk;
+        }
+
+        const file = try index.openFile(i, .{});
         defer file.close();
 
         var buffer: [1024]u8 = undefined;

@@ -45,7 +45,7 @@ pub const Query = struct {
             try buffer.appendSlice(alloc, "^\\(title\\|text\\):\\(\\|.*[^a-zA-Z0-9]\\)");
             for (phrase.items) |w| {
                 try buffer.appendSlice(alloc, w);
-                try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]+\\)");
+                try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]\\+\\)");
             }
         }
 
