@@ -6,22 +6,27 @@ fn splitWords(text: []const u8) std.mem.SplitIterator(u8, .any) {
 }
 
 pub const Query = struct {
-    include: []const u8,
-    exclude: []const u8,
+    pub const Kind = enum { include, exclude };
+
+    const Pattern = struct {
+        kind: Kind,
+        pattern: []const u8,
+    };
+
+    patterns: []const Pattern,
 
     pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
-        var include: std.ArrayList(u8) = .empty;
-        defer include.deinit(alloc);
-        var exclude: std.ArrayList(u8) = .empty;
-        defer exclude.deinit(alloc);
+        var patterns: std.ArrayList(Pattern) = .empty;
+        defer patterns.deinit(alloc);
 
         var phrase_it = std.mem.splitScalar(u8, q, ' ');
         while (phrase_it.next()) |p| {
             if (p.len == 0) continue;
 
             var explicit = false;
-            var buffer = &include;
+            var kind: Kind = .include;
 
+            // TODO: directly write to buffer
             var phrase = try std.ArrayList([]const u8).initCapacity(alloc, p.len);
             defer phrase.deinit(alloc);
 
@@ -30,8 +35,8 @@ pub const Query = struct {
                 if (w.len == 0) {
                     explicit = true;
                     switch (word_it.buffer[word_it.index.? - 1]) {
-                        '+' => buffer = &include,
-                        '-' => buffer = &exclude,
+                        '+' => kind = .include,
+                        '-' => kind = .exclude,
                         else => {},
                     }
                     continue;
@@ -41,24 +46,43 @@ pub const Query = struct {
 
             if (phrase.items.len == 1 and phrase.items[0].len == 1 and !explicit) continue;
 
-            if (buffer.items.len != 0) try buffer.append(alloc, '\n');
+            var buffer: std.ArrayList(u8) = .empty;
+            defer buffer.deinit(alloc);
             try buffer.appendSlice(alloc, "^\\(title\\|text\\):\\(\\|.*[^a-zA-Z0-9]\\)");
             for (phrase.items) |w| {
                 try buffer.appendSlice(alloc, w);
                 try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]\\+\\)");
             }
+
+            var pattern = try patterns.addOne(alloc);
+            errdefer _ = patterns.pop();
+            pattern.kind = kind;
+            pattern.pattern = try buffer.toOwnedSlice(alloc);
         }
 
-        if (include.items.len == 0) return null;
-        return .{
-            .include = try include.toOwnedSlice(alloc),
-            .exclude = try exclude.toOwnedSlice(alloc),
-        };
+        if (patterns.items.len == 0) return null;
+        std.mem.sort(Pattern, patterns.items, {}, struct {
+            fn lessThan(_: void, lhs: Pattern, rhs: Pattern) bool {
+                return switch (lhs.kind) {
+                    .include => switch (rhs.kind) {
+                        .include => false,
+                        .exclude => true,
+                    },
+                    .exclude => false,
+                };
+            }
+        }.lessThan);
+        switch (patterns.items[0].kind) {
+            .include => {},
+            .exclude => return null,
+        }
+
+        return .{ .patterns = try patterns.toOwnedSlice(alloc) };
     }
 
     pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
-        alloc.free(self.include);
-        alloc.free(self.exclude);
+        for (self.patterns) |*p| alloc.free(p.pattern);
+        alloc.free(self.patterns);
         self.* = undefined;
     }
 };

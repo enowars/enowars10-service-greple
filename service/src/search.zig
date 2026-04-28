@@ -30,15 +30,15 @@ pub fn getIndex(iterate: bool) !std.fs.Dir {
     return std.fs.cwd().openDir("index", .{ .iterate = iterate });
 }
 
-fn grep(alloc: std.mem.Allocator, cwd: std.fs.Dir, patterns: []const u8) !std.mem.SplitIterator(u8, .scalar) {
-    if (patterns.len == 0) return .{
+fn grep(alloc: std.mem.Allocator, cwd: std.fs.Dir, pattern: []const u8) !std.mem.SplitIterator(u8, .scalar) {
+    if (pattern.len == 0) return .{
         .buffer = "",
         .index = null,
         .delimiter = '\x00',
     };
     const run_result = try std.process.Child.run(.{
         .allocator = alloc,
-        .argv = &.{ "/bin/grep", "-rli", patterns, "." },
+        .argv = &.{ "/bin/grep", "-rli", pattern, "." },
         .cwd_dir = cwd,
     });
     alloc.free(run_result.stderr);
@@ -46,59 +46,70 @@ fn grep(alloc: std.mem.Allocator, cwd: std.fs.Dir, patterns: []const u8) !std.me
 }
 
 pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
+    std.debug.assert(q.patterns.len > 0);
+    std.debug.assert(q.patterns[0].kind == .include);
+
     var index = try getIndex(false);
     defer index.close();
 
+    var filenames: std.StringHashMap(void) = .init(alloc);
+    defer filenames.deinit();
+
     var timer = try std.time.Timer.start();
 
-    var include_it = try grep(alloc, index, q.include);
-    defer alloc.free(include_it.buffer);
+    var first_grep = try grep(alloc, index, q.patterns[0].pattern);
+    defer alloc.free(first_grep.buffer);
+    while (first_grep.next()) |f| if (f.len != 0) try filenames.put(f, {});
 
-    var exclude_it = try grep(alloc, index, q.exclude);
-    defer alloc.free(exclude_it.buffer);
+    for (q.patterns[1..]) |p| {
+        var next_grep = try grep(alloc, index, p.pattern);
+        defer alloc.free(next_grep.buffer);
 
-    const time = timer.read();
+        switch (p.kind) {
+            .include => {
+                var to_remove: std.StringHashMap(void) = try filenames.clone();
+                defer to_remove.deinit();
+                while (next_grep.next()) |f| _ = to_remove.remove(f);
+                var it = to_remove.keyIterator();
+                while (it.next()) |f| _ = filenames.remove(f.*);
+            },
+            .exclude => while (next_grep.next()) |f| {
+                _ = filenames.remove(f);
+            },
+        }
+    }
 
     var list: std.ArrayList(Document) = .empty;
     defer list.deinit(alloc);
 
-    blk: while (include_it.next()) |i| {
-        if (i.len == 0) continue;
-
-        exclude_it.reset();
-        while (exclude_it.next()) |e| {
-            if (e.len == 0) continue;
-            if (std.mem.eql(u8, i, e)) continue :blk;
-        }
-
-        const file = try index.openFile(i, .{});
+    var it = filenames.keyIterator();
+    while (it.next()) |f| {
+        const file = try index.openFile(f.*, .{});
         defer file.close();
 
         var buffer: [1024]u8 = undefined;
         var r = file.reader(&buffer);
 
         try r.seekBy("url:".len);
-        const url = try r.interface.takeDelimiterExclusive('\n');
+        const url = try alloc.dupe(u8, try r.interface.takeDelimiterExclusive('\n'));
+        errdefer alloc.free(url);
+
         try r.seekBy(1 + "title:".len);
-        const title = try r.interface.takeDelimiterExclusive('\n');
+        const title = try alloc.dupe(u8, try r.interface.takeDelimiterExclusive('\n'));
+        errdefer alloc.free(title);
+
         try r.seekBy(1 + "text:".len);
         const text = try r.interface.allocRemaining(alloc, .unlimited);
         errdefer alloc.free(text);
 
-        var document = try list.addOne(alloc);
-        errdefer _ = list.pop();
-        document.url = try alloc.dupe(u8, url);
-        errdefer alloc.free(document.url);
-        document.title = try alloc.dupe(u8, title);
-        errdefer alloc.free(document.title);
-        document.text = text;
+        try list.append(alloc, .{ .url = url, .title = title, .text = text });
     }
 
     // TODO: sort results only keep up to 10 results
 
     return Results{
         .documents = try list.toOwnedSlice(alloc),
-        .time = time,
+        .time = timer.read(),
         .total = list.items.len,
     };
 }
