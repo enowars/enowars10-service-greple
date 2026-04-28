@@ -55,12 +55,14 @@ const Template = struct {
 };
 
 pub const Index = struct {
+    index_size: u32,
+
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Greple");
     }
 
-    fn formatBody(_: *const anyopaque, w: *std.Io.Writer) !void {
-        // TODO: get size of index
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; max-width: 80rem">
             \\  <img width="300" height="117" src="/static/logo.gif" border="0" alt="Greple">
@@ -73,7 +75,7 @@ pub const Index = struct {
             \\    </div>
             \\  </form>
             \\</div>
-        , .{0});
+        , .{s.index_size});
     }
 
     pub fn interface(self: *const @This()) Template {

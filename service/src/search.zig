@@ -26,8 +26,12 @@ pub const Results = struct {
     }
 };
 
+pub fn getIndex(iterate: bool) !std.fs.Dir {
+    return std.fs.cwd().openDir("index", .{ .iterate = iterate });
+}
+
 pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
-    var index = try std.fs.cwd().openDir("index", .{});
+    var index = try getIndex(false);
     defer index.close();
 
     // TODO: also exclude

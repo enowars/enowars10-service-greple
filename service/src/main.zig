@@ -15,7 +15,16 @@ fn shutdown(_: i32) callconv(.c) noreturn {
 }
 
 fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.Index{}).interface());
+    var index = try search.getIndex(true);
+    defer index.close();
+
+    var index_size: u32 = 0;
+    var it = index.iterateAssumeFirstIteration();
+    while (try it.next()) |_| index_size += 1;
+
+    try templates.respond(res, (templates.Index{
+        .index_size = index_size,
+    }).interface());
 }
 
 fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
