@@ -11,9 +11,9 @@ pub const Query = struct {
 
     pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
         var include: std.ArrayList(u8) = .empty;
-        errdefer include.deinit(alloc);
+        defer include.deinit(alloc);
         var exclude: std.ArrayList(u8) = .empty;
-        errdefer exclude.deinit(alloc);
+        defer exclude.deinit(alloc);
 
         var phrase_it = std.mem.splitScalar(u8, q, ' ');
         while (phrase_it.next()) |p| {
@@ -50,12 +50,7 @@ pub const Query = struct {
             try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]\\)");
         }
 
-        if (include.items.len == 0) {
-            include.deinit(alloc);
-            exclude.deinit(alloc);
-            return null;
-        }
-
+        if (include.items.len == 0) return null;
         return .{
             .include = try include.toOwnedSlice(alloc),
             .exclude = try exclude.toOwnedSlice(alloc),

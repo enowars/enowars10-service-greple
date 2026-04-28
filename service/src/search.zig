@@ -34,7 +34,7 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
     var timer = try std.time.Timer.start();
     const run_result = try std.process.Child.run(.{
         .allocator = alloc,
-        .argv = &.{ "/bin/grep", "-r", q.include, "." },
+        .argv = &.{ "/bin/grep", "-rl", q.include, "." },
         .cwd_dir = index,
     });
     defer {
@@ -44,41 +44,33 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
     const time = timer.read();
     std.debug.print("{s}", .{run_result.stderr});
 
-    var filenames: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (filenames.items) |f| alloc.free(f);
-        filenames.deinit(alloc);
-    }
+    var list: std.ArrayList(Document) = .empty;
+    defer list.deinit(alloc);
 
     var it = std.mem.splitScalar(u8, run_result.stdout, '\n');
-    blk: while (it.next()) |l| {
+    while (it.next()) |l| {
         if (l.len == 0) continue;
-        const filename = l[0..std.mem.indexOfScalar(u8, l, ':').?];
-        for (filenames.items) |f| if (std.mem.eql(u8, filename, f)) continue :blk;
-        try filenames.append(alloc, try alloc.dupe(u8, filename));
-    }
-
-    var list: std.ArrayList(Document) = .empty;
-    errdefer list.deinit(alloc);
-
-    for (filenames.items) |f| {
-        const file = try index.openFile(f, .{});
+        const file = try index.openFile(l, .{});
         defer file.close();
 
         var buffer: [1024]u8 = undefined;
         var r = file.reader(&buffer);
 
-        const url = (try r.interface.takeDelimiterExclusive('\n'))["url:".len..];
-        try r.seekBy(1);
-        const title = (try r.interface.takeDelimiterExclusive('\n'))["title:".len..];
-        try r.seekBy(1);
-        // TODO: read text
-        const text = "Lorem ipsum";
+        try r.seekBy("url:".len);
+        const url = try r.interface.takeDelimiterExclusive('\n');
+        try r.seekBy(1 + "title:".len);
+        const title = try r.interface.takeDelimiterExclusive('\n');
+        try r.seekBy(1 + "text:".len);
+        const text = try r.interface.allocRemaining(alloc, .unlimited);
+        errdefer alloc.free(text);
 
         var document = try list.addOne(alloc);
+        errdefer _ = list.pop();
         document.url = try alloc.dupe(u8, url);
+        errdefer alloc.free(document.url);
         document.title = try alloc.dupe(u8, title);
-        document.text = try alloc.dupe(u8, text);
+        errdefer alloc.free(document.title);
+        document.text = text;
     }
 
     // TODO: sort results only keep up to 10 results
