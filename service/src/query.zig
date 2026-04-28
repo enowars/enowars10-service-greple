@@ -43,10 +43,15 @@ pub const Query = struct {
             var word_it = std.mem.splitAny(u8, p, seperators);
             while (word_it.next()) |w| {
                 if (w.len == 0) {
-                    explicit = true;
-                    switch (word_it.buffer[word_it.index.? - 1]) {
-                        '+' => kind = .include,
-                        '-' => kind = .exclude,
+                    switch (word_it.buffer[(word_it.index orelse word_it.buffer.len) - 1]) {
+                        '+' => {
+                            explicit = true;
+                            kind = .include;
+                        },
+                        '-' => {
+                            explicit = true;
+                            kind = .exclude;
+                        },
                         else => {},
                     }
                     continue;
