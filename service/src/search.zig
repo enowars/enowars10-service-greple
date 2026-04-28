@@ -94,11 +94,11 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
         const url = try alloc.dupe(u8, try r.interface.takeDelimiterExclusive('\n'));
         errdefer alloc.free(url);
 
-        try r.seekBy(1 + "title:".len);
+        try r.seekBy("\ntitle:".len);
         const title = try alloc.dupe(u8, try r.interface.takeDelimiterExclusive('\n'));
         errdefer alloc.free(title);
 
-        try r.seekBy(1 + "text:".len);
+        try r.seekBy("\ntext:".len);
         const text = try r.interface.allocRemaining(alloc, .unlimited);
         errdefer alloc.free(text);
 

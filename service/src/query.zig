@@ -1,9 +1,16 @@
 const std = @import("std");
 
-fn splitWords(text: []const u8) std.mem.SplitIterator(u8, .any) {
-    // TODO: handle non ascii
-    return std.mem.splitAny(u8, text, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~");
-}
+const seperators = struct {
+    fn f(c: u8) []const u8 {
+        const s = if (c < std.math.maxInt(u8)) f(c + 1) else "";
+        return switch (c) {
+            'a'...'z' => s,
+            'A'...'Z' => s,
+            '0'...'9' => s,
+            else => .{c} ++ s,
+        };
+    }
+}.f(0);
 
 pub const Query = struct {
     pub const Kind = enum { include, exclude };
@@ -30,7 +37,7 @@ pub const Query = struct {
             var phrase = try std.ArrayList([]const u8).initCapacity(alloc, p.len);
             defer phrase.deinit(alloc);
 
-            var word_it = splitWords(p);
+            var word_it = std.mem.splitAny(u8, p, seperators);
             while (word_it.next()) |w| {
                 if (w.len == 0) {
                     explicit = true;
