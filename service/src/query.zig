@@ -39,15 +39,14 @@ pub const Query = struct {
                 phrase.appendAssumeCapacity(w);
             }
 
-            // TODO: support phrases
-            if (phrase.items.len != 1) continue;
-
             if (phrase.items.len == 1 and phrase.items[0].len == 1 and !explicit) continue;
 
             if (buffer.items.len != 0) try buffer.append(alloc, '\n');
             try buffer.appendSlice(alloc, "^\\(title\\|text\\):\\(\\|.*[^a-zA-Z0-9]\\)");
-            try buffer.appendSlice(alloc, phrase.items[0]);
-            try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]\\)");
+            for (phrase.items) |w| {
+                try buffer.appendSlice(alloc, w);
+                try buffer.appendSlice(alloc, "\\($\\|[^a-zA-Z0-9]+\\)");
+            }
         }
 
         if (include.items.len == 0) return null;
