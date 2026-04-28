@@ -107,9 +107,10 @@ pub fn performSearch(alloc: std.mem.Allocator, q: *const query.Query) !Results {
 
     // TODO: sort results only keep up to 10 results
 
-    return Results{
+    const total = list.items.len;
+    return .{
         .documents = try list.toOwnedSlice(alloc),
         .time = timer.read(),
-        .total = list.items.len,
+        .total = total,
     };
 }
