@@ -22,15 +22,16 @@ fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
     const queryParams = try req.query();
     const q = queryParams.get("q") orelse "";
 
-    const results = blk: {
-        const parsed_q = try query.Query.init(res.arena, q) orelse break :blk search.Results{
+    var results = blk: {
+        var parsed_q = try query.Query.init(res.arena, q) orelse break :blk search.Results{
             .documents = &.{},
             .time = 0,
             .total = 0,
         };
         defer parsed_q.deinit(res.arena);
-        break :blk try search.performSearch(res.arena, parsed_q);
+        break :blk try search.performSearch(res.arena, &parsed_q);
     };
+    defer results.deinit(res.arena);
 
     if (queryParams.has("btnI") and results.documents.len > 0) {
         res.status = 302;

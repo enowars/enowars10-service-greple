@@ -60,6 +60,7 @@ pub const Index = struct {
     }
 
     fn formatBody(_: *const anyopaque, w: *std.Io.Writer) !void {
+        // TODO: get size of index
         try w.print(
             \\<div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; max-width: 80rem">
             \\  <img width="300" height="117" src="/static/logo.gif" border="0" alt="Greple">
@@ -72,7 +73,7 @@ pub const Index = struct {
             \\    </div>
             \\  </form>
             \\</div>
-        , .{search.index.len});
+        , .{0});
     }
 
     pub fn interface(self: *const @This()) Template {
@@ -109,11 +110,12 @@ pub const Search = struct {
             \\</div>
             \\<div style="padding: 2pt; color: white; background: #3366cc; max-width: 80rem; display: flex; justify-content: space-between">
             \\  <small>Searched the web for <b>{f}</b>.</small>
-            \\  <small>Results <b>1 - {d}</b> of <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
+            \\  <small>Results <b>{d} - {d}</b> of <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
             \\</div>
         , .{
             Escape{ .string = s.q },
             Escape{ .string = s.q },
+            @min(s.results.documents.len, 1),
             s.results.documents.len,
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
@@ -131,8 +133,8 @@ pub const Search = struct {
         , .{
             Escape{ .string = d.url },
             Escape{ .string = d.title },
-            Escape{ .string = d.text[0..80] },
-            Escape{ .string = d.text[80..160] },
+            Escape{ .string = d.text[0..@min(d.text.len, 80)] },
+            Escape{ .string = if (d.text.len > 80) d.text[80..@min(d.text.len, 160)] else "" },
             Escape{ .string = d.url },
         });
     }
