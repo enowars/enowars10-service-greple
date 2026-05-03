@@ -10,6 +10,6 @@ FROM scratch
 WORKDIR /greple
 COPY --from=0 /lib/ld-musl-*.so.1 /lib/
 COPY --from=0 /bin/grep /bin/
-COPY --from=0 /greple/zig-out/bin/greple .
 COPY index index
+COPY --from=0 /greple/zig-out/bin/greple .
 CMD ["./greple"]

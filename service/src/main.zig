@@ -32,22 +32,21 @@ fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
     const q = queryParams.get("q") orelse "";
 
     var results = blk: {
-        var parsed_q = try query.Query.init(res.arena, q) orelse break :blk search.Results{
-            .documents = &.{},
+        const pattern = try query.parse(res.arena, q) orelse break :blk search.Results{
+            .results = &.{},
             .time = 0,
             .total = 0,
         };
-        defer parsed_q.deinit(res.arena);
-        break :blk try search.performSearch(res.arena, &parsed_q);
+        break :blk try search.performSearch(res.arena, pattern);
     };
     defer results.deinit(res.arena);
 
-    if (queryParams.has("btnI") and results.documents.len > 0) {
+    if (queryParams.has("btnI") and results.results.len > 0) {
         res.status = 302;
         res.headers.add("Location", try std.mem.concat(
             res.arena,
             u8,
-            &.{ "http://", results.documents[0].url },
+            &.{ "http://", results.results[0].url },
         ));
         return;
     }

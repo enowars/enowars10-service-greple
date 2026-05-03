@@ -117,12 +117,12 @@ pub const Search = struct {
         , .{
             Escape{ .string = s.q },
             Escape{ .string = s.q },
-            @min(s.results.documents.len, 1),
-            s.results.documents.len,
+            @min(s.results.results.len, 1),
+            s.results.results.len,
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });
-        for (s.results.documents) |d| try w.print(
+        for (s.results.results) |d| try w.print(
             \\<p>
             \\  <a href="http://{f}">{f}</a>
             \\  <small>

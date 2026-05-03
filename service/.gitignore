@@ -1,5 +1,3 @@
-.zig-cache/
-zig-out/
-index/
-!index/zig.guide.txt
-!index/zig.guide_getting-started_installation.txt
+/index/*
+!/index/26ecabdfce4e45d42388a0dbeeac342ba8e5b557
+!/index/df45fc8b1195b09a5af99095c4414b5fdee029d5
