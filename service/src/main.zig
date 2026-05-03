@@ -38,14 +38,11 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
             .time = 0,
             .total = 0,
         };
-        defer res.arena.free(pattern);
         break :blk try search.performSearch(res.arena, pattern);
     };
-    defer results.deinit(res.arena);
 
     if (queryParams.has("btnI") and results.results.len > 0) {
         res.status = 302;
-        // TODO: do i have to free
         res.headers.add("Location", try std.mem.concat(
             res.arena,
             u8,

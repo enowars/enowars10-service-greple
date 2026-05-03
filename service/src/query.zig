@@ -15,8 +15,6 @@ const seperators = struct {
 
 pub fn parse(alloc: std.mem.Allocator, q: []const u8) !?[]const u8 {
     var pattern: std.ArrayList(u8) = .empty;
-    defer pattern.deinit(alloc);
-
     try pattern.appendSlice(alloc, "\\b");
 
     var first: bool = true;
