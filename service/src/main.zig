@@ -1,4 +1,5 @@
 const httpz = @import("httpz");
+const preferences = @import("preferences.zig");
 const query = @import("query.zig");
 const search = @import("search.zig");
 const std = @import("std");
@@ -14,7 +15,7 @@ fn shutdown(_: i32) callconv(.c) noreturn {
     std.posix.exit(0);
 }
 
-fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
+fn getIndex(_: *const httpz.Request, res: *httpz.Response) !void {
     var index = try search.getIndex(true);
     defer index.close();
 
@@ -27,7 +28,7 @@ fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
-fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
+fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
     const queryParams = try req.query();
     const q = queryParams.get("q") orelse "";
 
@@ -37,12 +38,14 @@ fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
             .time = 0,
             .total = 0,
         };
+        defer res.arena.free(pattern);
         break :blk try search.performSearch(res.arena, pattern);
     };
     defer results.deinit(res.arena);
 
     if (queryParams.has("btnI") and results.results.len > 0) {
         res.status = 302;
+        // TODO: do i have to free
         res.headers.add("Location", try std.mem.concat(
             res.arena,
             u8,
@@ -57,13 +60,28 @@ fn handleSearch(req: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
-fn handleHelp(_: *httpz.Request, res: *httpz.Response) !void {
+fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
+    try templates.respond(res, (templates.Preferences{
+        .preferences = try preferences.parse(req),
+    }).interface());
+}
+
+fn postPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
+    if (req.body()) |b| res.headers.add(
+        "Set-Cookie",
+        try std.mem.concat(res.arena, u8, &.{ "preferences=", b }),
+    );
+    res.status = 302;
+    res.headers.add("Location", req.url.path);
+}
+
+fn getHelp(_: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Help{}).interface());
 }
 
-fn handleLogoGif(_: *httpz.Request, res: *httpz.Response) !void {
+fn getLogoGif(_: *const httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
-    res.headers.add("Content-Type", "image/gif");
+    res.content_type = .GIF;
     res.body = @embedFile("static/logo.gif");
 }
 
@@ -77,17 +95,22 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var server = try httpz.Server(void).init(allocator, .{ .address = .all(7777) }, {});
+    var server = try httpz.Server(void).init(allocator, .{
+        .address = .all(7777),
+        .request = .{ .max_form_count = 3 },
+    }, {});
     defer {
         server.stop();
         server.deinit();
     }
 
     var router = try server.router(.{});
-    router.get("/", handleIndex, .{});
-    router.get("/search", handleSearch, .{});
-    router.get("/help", handleHelp, .{});
-    router.get("/static/logo.gif", handleLogoGif, .{});
+    router.get("/", getIndex, .{});
+    router.get("/search", getSearch, .{});
+    router.get("/preferences", getPreferences, .{});
+    router.post("/preferences", postPreferences, .{});
+    router.get("/help", getHelp, .{});
+    router.get("/static/logo.gif", getLogoGif, .{});
 
     server_instance = &server;
     try server.listen();
