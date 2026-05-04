@@ -1,9 +1,7 @@
-const std = @import("std");
+const index = @import("index.zig");
+const preferences = @import("preferences.zig");
 const query = @import("query.zig");
-
-pub fn getIndex(iterate: bool) !std.fs.Dir {
-    return std.fs.cwd().openDir("index", .{ .iterate = iterate });
-}
+const std = @import("std");
 
 fn performGrep(alloc: std.mem.Allocator, cwd: std.fs.Dir, pattern: []const u8) ![]const u8 {
     // TODO: configure to not capture stderr?
@@ -15,8 +13,9 @@ fn performGrep(alloc: std.mem.Allocator, cwd: std.fs.Dir, pattern: []const u8) !
     return result.stdout;
 }
 
-const PartialResult = struct {
-    sha1: []const u8,
+const Result = struct {
+    url: ?[]const u8,
+    title: ?[]const u8,
     text: []const u8,
     score: f32,
 
@@ -30,10 +29,15 @@ const PartialResult = struct {
     }
 };
 
-fn aggregatePartialResults(alloc: std.mem.Allocator, stdout: []const u8) !std.StringHashMap(PartialResult) {
-    var results: std.StringHashMap(PartialResult) = .init(alloc);
-    var it = std.mem.splitScalar(u8, stdout, '\n');
-    while (it.next()) |l| {
+fn aggregateResults(
+    alloc: std.mem.Allocator,
+    cwd: std.fs.Dir,
+    prefs: *const preferences.Preferences,
+    stdout: []const u8,
+) !struct { results: std.StringHashMap(Result), filtered: usize } {
+    var results: std.StringHashMap(Result) = .init(alloc);
+    var line_it = std.mem.splitScalar(u8, stdout, '\n');
+    while (line_it.next()) |l| {
         if (l.len == 0) continue;
 
         var split = std.mem.splitScalar(u8, l, ':');
@@ -47,94 +51,75 @@ fn aggregatePartialResults(alloc: std.mem.Allocator, stdout: []const u8) !std.St
             result.value_ptr.add_match(text);
         } else {
             result.key_ptr.* = sha1;
-            result.value_ptr.sha1 = sha1;
+            result.value_ptr.url = null;
+            result.value_ptr.title = null;
             result.value_ptr.text = text;
             result.value_ptr.score = 0;
         }
     }
-    return results;
+
+    var filtered: usize = 0;
+    var entry_it = results.iterator();
+    while (entry_it.next()) |e| {
+        const header = try index.readHeader(alloc, cwd, e.key_ptr.*);
+
+        // TODO: use actual safe search regex to filter
+        if (prefs.safe_search_enabled and std.ascii.startsWithIgnoreCase(header.url, prefs.safe_search_regex)) {
+            filtered += 1;
+            results.removeByPtr(e.key_ptr);
+            continue;
+        }
+
+        // TODO: filter based on permission to see result
+        if (e.key_ptr.*[0] == 'a') {
+            results.removeByPtr(e.key_ptr);
+            continue;
+        }
+
+        e.value_ptr.url = header.url;
+        e.value_ptr.title = header.title;
+    }
+
+    return .{
+        .results = results,
+        .filtered = filtered,
+    };
 }
 
-fn getTop10PartialResults(
-    alloc: std.mem.Allocator,
-    results: std.StringHashMap(PartialResult),
-) ![]const *const PartialResult {
-    var top10Results: std.ArrayList(*const PartialResult) = try .initCapacity(alloc, @min(10, results.count()));
+fn getTop10Results(alloc: std.mem.Allocator, results: std.StringHashMap(Result)) ![]const *const Result {
+    var top10_results: std.ArrayList(*const Result) = try .initCapacity(alloc, @min(10, results.count()));
     var it = results.iterator();
     while (it.next()) |e| {
-        const i = std.sort.upperBound(
-            *const PartialResult,
-            top10Results.items,
-            e.value_ptr,
-            PartialResult.order,
-        );
-        if (i == top10Results.capacity) continue;
-        if (top10Results.items.len == top10Results.capacity) _ = top10Results.pop();
-        top10Results.insertAssumeCapacity(i, e.value_ptr);
+        const i = std.sort.upperBound(*const Result, top10_results.items, e.value_ptr, Result.order);
+        if (i == top10_results.capacity) continue;
+        if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();
+        top10_results.insertAssumeCapacity(i, e.value_ptr);
     }
-    return top10Results.items;
-}
-
-const Result = struct {
-    url: []const u8,
-    title: []const u8,
-    text: []const u8,
-};
-
-fn readIndexData(alloc: std.mem.Allocator, cwd: std.fs.Dir, sha1: []const u8) !struct {
-    url: []const u8,
-    title: []const u8,
-} {
-    const file = try cwd.openFile(sha1, .{});
-    defer file.close();
-
-    var reader = file.reader(&.{});
-    var content: std.ArrayList(u8) = try .initCapacity(alloc, 32);
-    while (true) {
-        content.items.len += try reader.interface.readSliceShort(content.unusedCapacitySlice());
-        if (std.mem.containsAtLeastScalar(u8, content.items, 2, '\n')) break;
-        if (content.items.len < content.capacity) return error.InvalidIndexFileFormat;
-        try content.ensureUnusedCapacity(alloc, 1);
-    }
-
-    var it = std.mem.splitScalar(u8, content.items, '\n');
-    return .{ .url = it.next().?, .title = it.next().? };
-}
-
-fn loadAdditionalResultData(alloc: std.mem.Allocator, cwd: std.fs.Dir, partial_results: []const *const PartialResult) ![]Result {
-    const results: []Result = try alloc.alloc(Result, partial_results.len);
-    for (0.., partial_results) |i, r| {
-        const data = try readIndexData(alloc, cwd, r.sha1);
-        results[i] = .{
-            .url = data.url,
-            .title = data.title,
-            .text = r.text,
-        };
-    }
-    return results;
+    return top10_results.items;
 }
 
 pub const Results = struct {
-    results: []Result,
+    results: []const *const Result,
     time: u64,
     total: usize,
+    filtered: usize,
 };
 
-pub fn performSearch(alloc: std.mem.Allocator, pattern: []const u8) !Results {
-    var cwd = try getIndex(false);
+pub fn performSearch(alloc: std.mem.Allocator, prefs: *const preferences.Preferences, pattern: []const u8) !Results {
+    var cwd = try index.getDir(false);
     defer cwd.close();
 
     var timer = try std.time.Timer.start();
     const stdout = try performGrep(alloc, cwd, pattern);
     const time = timer.read();
 
-    const partial_results = try aggregatePartialResults(alloc, stdout);
-    const top10_partial_results = try getTop10PartialResults(alloc, partial_results);
-    const results = try loadAdditionalResultData(alloc, cwd, top10_partial_results);
+    const results = try aggregateResults(alloc, cwd, prefs, stdout);
+    const top10_results = try getTop10Results(alloc, results.results);
 
     return .{
-        .results = results,
+        .results = top10_results,
         .time = time,
-        .total = partial_results.count(),
+        .total = results.results.count(),
+        .filtered = results.filtered,
     };
 }

@@ -7,7 +7,7 @@ pub const Preferences = struct {
 };
 
 pub fn parse(req: *const httpz.Request) !Preferences {
-    var preferences: Preferences = .{};
+    var prefs: Preferences = .{};
 
     if (req.cookies().get("preferences")) |c| {
         var it = std.mem.splitScalar(u8, c, '&');
@@ -17,13 +17,13 @@ pub fn parse(req: *const httpz.Request) !Preferences {
                 const value = std.Uri.percentDecodeInPlace(try req.arena.dupe(u8, kv[s + 1 ..]));
 
                 if (std.mem.eql(u8, key, "safe_search_enabled")) {
-                    preferences.safe_search_enabled = true;
+                    prefs.safe_search_enabled = true;
                 } else if (std.mem.eql(u8, key, "safe_search_regex")) {
-                    preferences.safe_search_regex = value;
+                    prefs.safe_search_regex = value;
                 }
             }
         }
     }
 
-    return preferences;
+    return prefs;
 }

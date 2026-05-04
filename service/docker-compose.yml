@@ -3,6 +3,8 @@ services:
     build: .
     ports:
       - "7777:7777"
+    volumes:
+      - ./index:/greple/index
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1

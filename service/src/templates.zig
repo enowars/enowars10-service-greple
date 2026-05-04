@@ -147,12 +147,18 @@ pub const Search = struct {
             \\  </small>
             \\</p>
         , .{
-            Escape{ .string = d.url },
-            Escape{ .string = d.title },
+            Escape{ .string = d.url.? },
+            Escape{ .string = d.title.? },
             Escape{ .string = d.text[0..@min(d.text.len, 80)] },
             Escape{ .string = if (d.text.len > 80) d.text[80..@min(d.text.len, 160)] else "" },
-            Escape{ .string = d.url },
+            Escape{ .string = d.url.? },
         });
+        if (s.results.filtered > 0) try w.print(
+            \\<p style="font-size: small">We have removed {d} results from this
+            \\page because they were filtered out by your safe search settings.
+            \\If you wish to see these results, you can adjust your filter
+            \\settings in your search preferences.</p>
+        , .{s.results.filtered});
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
@@ -214,7 +220,7 @@ const Columns = struct {
 };
 
 pub const Preferences = struct {
-    preferences: preferences.Preferences,
+    prefs: *const preferences.Preferences,
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Preferences");
@@ -241,8 +247,8 @@ pub const Preferences = struct {
             \\  <p><input type="submit" value="Save"></p>
             \\</form>
         , .{
-            if (s.preferences.safe_search_enabled) " checked" else "",
-            Escape{ .string = s.preferences.safe_search_regex },
+            if (s.prefs.safe_search_enabled) " checked" else "",
+            Escape{ .string = s.prefs.safe_search_regex },
         });
     }
 
@@ -257,6 +263,47 @@ pub const Preferences = struct {
 
     pub fn interface(self: *const @This()) Template {
         return Template{ .self = self, .formatFn = &format };
+    }
+};
+
+pub const SearchConsole = struct {
+    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll("Search Console");
+    }
+
+    fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll(
+            \\<li><a href="#submit">Submit Page</a></li>
+        );
+    }
+
+    fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll(
+            \\<a name="submit"><b>Submit Page</b></a>
+            \\<p>Submit a page to be crawled and added to the search index.</p>
+            \\<form method="POST" style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem">
+            \\  <label for="url">URL:</label>
+            \\  <input id="url" name="url" size="32">
+            \\  <label for="title">Title:</label>
+            \\  <input id="title" name="title" size="32">
+            \\  <label for="text">Text:</label>
+            \\  <textarea id="text" name="text" rows="16" cols="64"></textarea>
+            \\  <input type="submit" value="Submit" style="grid-column: 1 / 3">
+            \\</form>
+        );
+    }
+
+    fn format(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Columns{
+            .self = &{},
+            .formatTitleFn = &formatTitle,
+            .formatTOCFn = &formatTOC,
+            .formatMainFn = &formatMain,
+        }).interface().format(w);
+    }
+
+    pub fn interface(_: *const @This()) Template {
+        return Template{ .self = &{}, .formatFn = &format };
     }
 };
 

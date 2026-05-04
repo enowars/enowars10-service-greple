@@ -1,4 +1,5 @@
 const httpz = @import("httpz");
+const index = @import("index.zig");
 const preferences = @import("preferences.zig");
 const query = @import("query.zig");
 const search = @import("search.zig");
@@ -16,11 +17,11 @@ fn shutdown(_: i32) callconv(.c) noreturn {
 }
 
 fn getIndex(_: *const httpz.Request, res: *httpz.Response) !void {
-    var index = try search.getIndex(true);
-    defer index.close();
+    var dir = try index.getDir(true);
+    defer dir.close();
 
     var index_size: u32 = 0;
-    var it = index.iterateAssumeFirstIteration();
+    var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |_| index_size += 1;
 
     try templates.respond(res, (templates.Index{
@@ -29,6 +30,8 @@ fn getIndex(_: *const httpz.Request, res: *httpz.Response) !void {
 }
 
 fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
+    const prefs = try preferences.parse(req);
+
     const queryParams = try req.query();
     const q = queryParams.get("q") orelse "";
 
@@ -37,8 +40,9 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
             .results = &.{},
             .time = 0,
             .total = 0,
+            .filtered = 0,
         };
-        break :blk try search.performSearch(res.arena, pattern);
+        break :blk try search.performSearch(res.arena, &prefs, pattern);
     };
 
     if (queryParams.has("btnI") and results.results.len > 0) {
@@ -46,7 +50,7 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
         res.headers.add("Location", try std.mem.concat(
             res.arena,
             u8,
-            &.{ "http://", results.results[0].url },
+            &.{ "http://", results.results[0].url.? },
         ));
         return;
     }
@@ -57,9 +61,26 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
+fn getSearchConsole(_: *const httpz.Request, res: *httpz.Response) !void {
+    try templates.respond(res, (templates.SearchConsole{}).interface());
+}
+
+fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 302;
+    res.headers.add("Location", req.url.path);
+
+    const data = try req.formData();
+
+    const url = data.get("url") orelse return;
+    const title = data.get("title") orelse return;
+    const text = data.get("text") orelse return;
+
+    try index.writeEntry(url, title, text);
+}
+
 fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Preferences{
-        .preferences = try preferences.parse(req),
+        .prefs = &try preferences.parse(req),
     }).interface());
 }
 
@@ -104,6 +125,8 @@ pub fn main() !void {
     var router = try server.router(.{});
     router.get("/", getIndex, .{});
     router.get("/search", getSearch, .{});
+    router.get("/console", getSearchConsole, .{});
+    router.post("/console", postSearchConsole, .{});
     router.get("/preferences", getPreferences, .{});
     router.post("/preferences", postPreferences, .{});
     router.get("/help", getHelp, .{});
