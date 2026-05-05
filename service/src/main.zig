@@ -75,7 +75,7 @@ fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     const title = data.get("title") orelse return;
     const text = data.get("text") orelse return;
 
-    try index.writeEntry(url, title, text);
+    try index.writeEntry(res.arena, url, title, text);
 }
 
 fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
