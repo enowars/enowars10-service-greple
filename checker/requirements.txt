@@ -1,0 +1,4 @@
+enochecker3==0.14.0
+uvicorn
+gunicorn
+faker

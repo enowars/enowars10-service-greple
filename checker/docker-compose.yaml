@@ -1,0 +1,36 @@
+services:
+  greple-checker:
+    build: .
+    ports:
+      - 17777:8000
+    environment:
+      - MONGO_ENABLED=1
+      - MONGO_HOST=greple-mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=greple
+      - MONGO_PASSWORD=greple
+    mem_limit: 1G
+    memswap_limit: 2G
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+      nproc:
+        soft: 4000
+        hard: 4000
+  greple-mongo:
+    image: mongo
+    volumes:
+      - ./data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: greple
+      MONGO_INITDB_ROOT_PASSWORD: greple
+    mem_limit: 1G
+    memswap_limit: 2G
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+      nproc:
+        soft: 4000
+        hard: 4000
