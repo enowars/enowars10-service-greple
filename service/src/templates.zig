@@ -236,6 +236,13 @@ pub const Preferences = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<form method="POST">
+            \\  <a name="user"><b>User</b></a>
+            \\  <div style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem; margin: 1rem 0">
+            \\    <label for="user">Username:</label>
+            \\    <input id="user" name="user" size="32" value="{f}">
+            \\    <label for="password">Password:</label>
+            \\    <input id="password" name="password" size="32" type="password">
+            \\  </div>
             \\  <a name="safe_search"><b>Safe Search</b></a>
             \\  <p>Filter out search results matching a defined regular expression.</p>
             \\  <div style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem">
@@ -247,6 +254,7 @@ pub const Preferences = struct {
             \\  <p><input type="submit" value="Save"></p>
             \\</form>
         , .{
+            Escape{ .string = s.prefs.user },
             if (s.prefs.safe_search_enabled) " checked" else "",
             Escape{ .string = s.prefs.safe_search_regex },
         });

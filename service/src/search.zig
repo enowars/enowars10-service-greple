@@ -78,7 +78,7 @@ fn getTop10Results(
             continue;
         }
 
-        const header = try index.readHeader(alloc, dir, e.key_ptr.*) orelse continue;
+        const header = try index.readHeader(alloc, dir, prefs, e.key_ptr.*) orelse continue;
         e.value_ptr.url = header.url;
         e.value_ptr.title = header.title;
 
