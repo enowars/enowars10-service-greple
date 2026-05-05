@@ -1,6 +1,8 @@
 const preferences = @import("preferences.zig");
 const std = @import("std");
 
+pub const header_lines = 3;
+
 pub fn getDir(iterate: bool) !std.fs.Dir {
     return std.fs.cwd().openDir("index", .{ .iterate = iterate });
 }
@@ -22,7 +24,7 @@ pub fn readHeader(
     var content: std.ArrayList(u8) = try .initCapacity(alloc, 32);
     while (true) {
         content.items.len += try reader.interface.readSliceShort(content.unusedCapacitySlice());
-        if (std.mem.containsAtLeastScalar(u8, content.items, 3, '\n')) break;
+        if (std.mem.containsAtLeastScalar(u8, content.items, header_lines, '\n')) break;
         if (content.items.len < content.capacity) return error.InvalidIndexFileFormat;
         try content.ensureUnusedCapacity(alloc, 1);
     }

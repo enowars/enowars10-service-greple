@@ -39,7 +39,7 @@ fn aggregateResults(alloc: std.mem.Allocator, stdout: []const u8) !std.StringHas
         var split = std.mem.splitScalar(u8, l, ':');
         const sha1 = split.next().?["./".len..];
         const line = try std.fmt.parseInt(usize, split.next().?, 10);
-        if (line <= 2) continue;
+        if (line <= index.header_lines) continue;
         const text = split.next().?;
 
         const result = try results.getOrPut(sha1);

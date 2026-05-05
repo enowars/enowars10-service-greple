@@ -228,6 +228,7 @@ pub const Preferences = struct {
 
     fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
+            \\<li><a href="#user_account">User Account</a></li>
             \\<li><a href="#safe_search">Safe Search</a></li>
         );
     }
@@ -236,7 +237,7 @@ pub const Preferences = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<form method="POST">
-            \\  <a name="user"><b>User</b></a>
+            \\  <a name="user_account"><b>User Account</b></a>
             \\  <div style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem; margin: 1rem 0">
             \\    <label for="user">Username:</label>
             \\    <input id="user" name="user" size="32" value="{f}">
