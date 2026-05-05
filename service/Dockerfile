@@ -8,8 +8,8 @@ RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/
 
 FROM scratch
 USER 1000:1000
-WORKDIR /greple
+WORKDIR /data
 COPY --from=0 /lib/ld-musl-*.so.1 /lib/
 COPY --from=0 /bin/grep /bin/
-COPY --from=0 /greple/zig-out/bin/greple .
-CMD ["./greple"]
+COPY --from=0 /greple/zig-out/bin/greple /
+CMD ["/greple"]
