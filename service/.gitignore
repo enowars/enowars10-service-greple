@@ -1,3 +1,5 @@
 /index/*
 !/index/1621db31b6934d1e845900f72af64376c4db2b18
 !/index/3fcc87f2052b24bf9351cceabc2d29235334cc77
+/users/*
+!/users/12dea96fec20593566ab75692c9949596833adc9

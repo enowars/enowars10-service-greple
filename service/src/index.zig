@@ -28,12 +28,7 @@ pub fn readHeader(
     }
 
     var it = std.mem.splitScalar(u8, content.items, '\n');
-    const user = it.next().?;
-    if (blk: {
-        if (std.mem.eql(u8, user, "anybody")) break :blk false;
-        if (prefs.user) |u| if (std.mem.eql(u8, user, u)) break :blk false;
-        break :blk true;
-    }) return null;
+    if (!prefs.canRead(it.next().?)) return null;
     return .{ .url = it.next().?, .title = it.next().? };
 }
 
@@ -44,9 +39,7 @@ pub fn writeEntry(
     title: []const u8,
     text: []const u8,
 ) !void {
-    const user = prefs.user orelse "nobody";
-
-    const data = try std.mem.concat(alloc, u8, &.{ user, "\x00", url });
+    const data = try std.mem.concat(alloc, u8, &.{ prefs.user, "\x00", url });
     var hash: [20]u8 = undefined;
     std.crypto.hash.Sha1.hash(data, &hash, .{});
     const sha1 = std.fmt.bytesToHex(hash, .lower);
@@ -57,7 +50,7 @@ pub fn writeEntry(
     var file = try dir.createFile(&sha1, .{ .exclusive = true });
     defer file.close();
 
-    try file.writeAll(user);
+    try file.writeAll(prefs.user);
     try file.writeAll("\n");
     try file.writeAll(url);
     try file.writeAll("\n");
