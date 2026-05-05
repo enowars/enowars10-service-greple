@@ -126,7 +126,7 @@ pub const Search = struct {
             \\</div>
             \\<div style="padding: 2pt; color: white; background: #3366cc; max-width: 80rem; display: flex; justify-content: space-between">
             \\  <small>Searched the web for <b>{f}</b>.</small>
-            \\  <small>Results <b>{d} - {d}</b> of <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
+            \\  <small>Results <b>{d} - {d}</b> of about <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
             \\</div>
         , .{
             Escape{ .string = s.q },

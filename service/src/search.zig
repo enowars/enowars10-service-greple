@@ -29,15 +29,11 @@ const Result = struct {
     }
 };
 
-fn aggregateResults(
-    alloc: std.mem.Allocator,
-    cwd: std.fs.Dir,
-    prefs: *const preferences.Preferences,
-    stdout: []const u8,
-) !struct { results: std.StringHashMap(Result), filtered: usize } {
+fn aggregateResults(alloc: std.mem.Allocator, stdout: []const u8) !std.StringHashMap(Result) {
     var results: std.StringHashMap(Result) = .init(alloc);
-    var line_it = std.mem.splitScalar(u8, stdout, '\n');
-    while (line_it.next()) |l| {
+
+    var it = std.mem.splitScalar(u8, stdout, '\n');
+    while (it.next()) |l| {
         if (l.len == 0) continue;
 
         var split = std.mem.splitScalar(u8, l, ':');
@@ -58,44 +54,42 @@ fn aggregateResults(
         }
     }
 
-    var filtered: usize = 0;
-    var entry_it = results.iterator();
-    while (entry_it.next()) |e| {
-        const header = try index.readHeader(alloc, cwd, e.key_ptr.*);
-
-        // TODO: use actual safe search regex to filter
-        if (prefs.safe_search_enabled and std.ascii.startsWithIgnoreCase(header.url, prefs.safe_search_regex)) {
-            filtered += 1;
-            results.removeByPtr(e.key_ptr);
-            continue;
-        }
-
-        // TODO: filter based on permission to see result
-        if (e.key_ptr.*[0] == 'a') {
-            results.removeByPtr(e.key_ptr);
-            continue;
-        }
-
-        e.value_ptr.url = header.url;
-        e.value_ptr.title = header.title;
-    }
-
-    return .{
-        .results = results,
-        .filtered = filtered,
-    };
+    return results;
 }
 
-fn getTop10Results(alloc: std.mem.Allocator, results: std.StringHashMap(Result)) ![]const *const Result {
+fn getTop10Results(
+    alloc: std.mem.Allocator,
+    dir: std.fs.Dir,
+    prefs: *const preferences.Preferences,
+    results: std.StringHashMap(Result),
+) !struct { results: []const *const Result, filtered: usize } {
     var top10_results: std.ArrayList(*const Result) = try .initCapacity(alloc, @min(10, results.count()));
+    var filtered: usize = 0;
+
     var it = results.iterator();
     while (it.next()) |e| {
         const i = std.sort.upperBound(*const Result, top10_results.items, e.value_ptr, Result.order);
+
         if (i == top10_results.capacity) continue;
+
+        // TODO: use actual safe search regex to filter
+        if (prefs.safe_search_enabled and std.ascii.indexOfIgnoreCase(e.value_ptr.text, prefs.safe_search_regex) != null) {
+            filtered += 1;
+            continue;
+        }
+
+        const header = try index.readHeader(alloc, dir, e.key_ptr.*) orelse continue;
+        e.value_ptr.url = header.url;
+        e.value_ptr.title = header.title;
+
         if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();
         top10_results.insertAssumeCapacity(i, e.value_ptr);
     }
-    return top10_results.items;
+
+    return .{
+        .results = top10_results.items,
+        .filtered = filtered,
+    };
 }
 
 pub const Results = struct {
@@ -113,13 +107,13 @@ pub fn performSearch(alloc: std.mem.Allocator, prefs: *const preferences.Prefere
     const stdout = try performGrep(alloc, cwd, pattern);
     const time = timer.read();
 
-    const results = try aggregateResults(alloc, cwd, prefs, stdout);
-    const top10_results = try getTop10Results(alloc, results.results);
+    const results = try aggregateResults(alloc, stdout);
+    const top10_results = try getTop10Results(alloc, cwd, prefs, results);
 
     return .{
-        .results = top10_results,
+        .results = top10_results.results,
         .time = time,
-        .total = results.results.count(),
-        .filtered = results.filtered,
+        .total = if (top10_results.results.len < 10) top10_results.results.len else results.count(),
+        .filtered = top10_results.filtered,
     };
 }
