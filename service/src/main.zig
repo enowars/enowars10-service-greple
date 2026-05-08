@@ -126,10 +126,10 @@ pub fn main() !void {
         .flags = 0,
     }, null);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     const allocator = gpa.allocator();
 
-    var server = try httpz.Server(void).init(allocator, .{
+    var server: httpz.Server(void) = try .init(allocator, .{
         .address = .all(7777),
         .request = .{ .max_form_count = 3 },
     }, {});

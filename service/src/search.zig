@@ -1,4 +1,5 @@
 const index = @import("index.zig");
+const mvzr = @import("mvzr");
 const preferences = @import("preferences.zig");
 const query = @import("query.zig");
 const std = @import("std");
@@ -58,12 +59,16 @@ fn aggregateResults(alloc: std.mem.Allocator, stdout: []const u8) !std.StringHas
     return results;
 }
 
+const Regex = mvzr.SizedRegex(1 << 10, 1 << 3);
+
 fn getTop10Results(
     alloc: std.mem.Allocator,
     dir: std.fs.Dir,
     prefs: *const preferences.Preferences,
     results: std.StringHashMap(Result),
 ) !struct { results: []const *const Result, filtered: usize } {
+    var regex: ?Regex = if (prefs.safe_search_enabled) .compile(prefs.safe_search_regex) else null;
+
     var top10_results: std.ArrayList(*const Result) = try .initCapacity(alloc, @min(10, results.count()));
     var filtered: usize = 0;
 
@@ -73,11 +78,10 @@ fn getTop10Results(
 
         if (i == top10_results.capacity) continue;
 
-        // TODO: use actual safe search regex to filter
-        if (prefs.safe_search_enabled and std.ascii.indexOfIgnoreCase(e.value_ptr.text, prefs.safe_search_regex) != null) {
+        if (regex) |*r| if (r.match(e.value_ptr.text)) |_| {
             filtered += 1;
             continue;
-        }
+        };
 
         const header = try index.readHeader(alloc, dir, prefs, e.key_ptr.*) orelse continue;
         e.value_ptr.url = header.url;
@@ -104,12 +108,11 @@ pub fn performSearch(alloc: std.mem.Allocator, prefs: *const preferences.Prefere
     var cwd = try index.getDir(false);
     defer cwd.close();
 
-    var timer = try std.time.Timer.start();
+    var timer: std.time.Timer = try .start();
     const stdout = try performGrep(alloc, cwd, pattern);
-    const time = timer.read();
-
     const results = try aggregateResults(alloc, stdout);
     const top10_results = try getTop10Results(alloc, cwd, prefs, results);
+    const time = timer.read();
 
     return .{
         .results = top10_results.results,

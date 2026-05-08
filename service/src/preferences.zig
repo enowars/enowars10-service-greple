@@ -24,8 +24,9 @@ pub fn parse(req: *const httpz.Request) !Preferences {
         var it = std.mem.splitScalar(u8, c, '&');
         while (it.next()) |kv| {
             if (std.mem.indexOfScalarPos(u8, kv, 0, '=')) |s| {
-                const key = std.Uri.percentDecodeInPlace(try req.arena.dupe(u8, kv[0..s]));
-                const value = std.Uri.percentDecodeInPlace(try req.arena.dupe(u8, kv[s + 1 ..]));
+                var dupe = try req.arena.dupe(u8, kv);
+                const key = std.Uri.percentDecodeInPlace(dupe[0..s]);
+                const value = std.Uri.percentDecodeInPlace(dupe[s + 1 ..]);
 
                 if (std.mem.eql(u8, key, "user")) {
                     prefs.user = value;

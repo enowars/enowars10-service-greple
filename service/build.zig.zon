@@ -8,6 +8,10 @@
             .url = "https://github.com/karlseguin/http.zig/archive/1a4d53b95bc4ac6c84cbc081727428de40c8c635.tar.gz",
             .hash = "httpz-0.0.0-PNVzrNVOBwDlxyffzwONpI9j9dYqKWXxopU1ZCLt4C09",
         },
+        .mvzr = .{
+            .url = "https://github.com/mnemnion/mvzr/archive/refs/tags/v0.3.9.tar.gz",
+            .hash = "mvzr-0.3.9-ZSOky_lvAQDe3gx6pFgM_NG-jl9NO_83u5OI1MF8-2PC",
+        },
     },
     .paths = .{
         "build.zig",
