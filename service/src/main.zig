@@ -61,27 +61,43 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
-fn getSearchConsole(_: *const httpz.Request, res: *httpz.Response) !void {
+fn checkLogin(prefs: *const preferences.Preferences, res: *httpz.Response) !bool {
+    if (std.mem.eql(u8, prefs.user, preferences.user_nobody)) {
+        try templates.respond(res, (templates.Error{
+            .message =
+            \\You are not allowed to access this page.
+            \\Login in <a href="/preferences" style="color: white">preferences</a>.
+            ,
+        }).interface());
+        return false;
+    }
+    return true;
+}
+
+fn getSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
+    const prefs = try preferences.parse(req);
+    if (!try checkLogin(&prefs, res)) return;
     try templates.respond(res, (templates.SearchConsole{}).interface());
 }
 
 fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 302;
-    res.headers.add("Location", req.url.path);
+    const prefs = try preferences.parse(req);
+    if (!try checkLogin(&prefs, res)) return;
 
     const data = try req.formData();
-
     const url = data.get("url") orelse return;
     const title = data.get("title") orelse return;
     const text = data.get("text") orelse return;
 
-    try index.writeEntry(res.arena, &try preferences.parse(req), url, title, text);
+    try index.writeEntry(res.arena, &prefs, url, title, text);
+
+    res.status = 302;
+    res.headers.add("Location", req.url.path);
 }
 
 fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.Preferences{
-        .prefs = &try preferences.parse(req),
-    }).interface());
+    const prefs = try preferences.parse(req);
+    try templates.respond(res, (templates.Preferences{ .prefs = &prefs }).interface());
 }
 
 fn postPreferences(req: *const httpz.Request, res: *httpz.Response) !void {

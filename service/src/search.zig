@@ -4,12 +4,13 @@ const query = @import("query.zig");
 const std = @import("std");
 
 fn performGrep(alloc: std.mem.Allocator, cwd: std.fs.Dir, pattern: []const u8) ![]const u8 {
-    // TODO: configure to not capture stderr?
     const result = try std.process.Child.run(.{
         .allocator = alloc,
         .argv = &.{ "/bin/grep", "-rin", pattern, "." },
         .cwd_dir = cwd,
+        .max_output_bytes = std.math.maxInt(usize),
     });
+    alloc.free(result.stderr);
     return result.stdout;
 }
 

@@ -44,7 +44,6 @@ const Base = struct {
             \\  <style>
             \\    *{{box-sizing:border-box}}
             \\    body{{font-family:Arial,sans-serif}}
-            \\    a.l{{color:#6f6f6f}}
             \\  </style>
             \\</head>
             \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">{f}</body>
@@ -139,18 +138,13 @@ pub const Search = struct {
         for (s.results.results) |d| try w.print(
             \\<p>
             \\  <a href="http://{f}">{f}</a>
-            \\  <small>
-            \\    <br>
-            \\    {f}<br>
-            \\    {f}<br>
-            \\    <font color="green">{f}</font>
-            \\  </small>
+            \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
+            \\  <small><font color="green">{f}</font></small>
             \\</p>
         , .{
             Escape{ .string = d.url.? },
             Escape{ .string = d.title.? },
-            Escape{ .string = d.text[0..@min(d.text.len, 80)] },
-            Escape{ .string = if (d.text.len > 80) d.text[80..@min(d.text.len, 160)] else "" },
+            Escape{ .string = d.text },
             Escape{ .string = d.url.? },
         });
         if (s.results.filtered > 0) try w.print(
@@ -342,6 +336,37 @@ pub const Help = struct {
             .formatTitleFn = &formatTitle,
             .formatTOCFn = &formatTOC,
             .formatMainFn = &formatMain,
+        }).interface().format(w);
+    }
+
+    pub fn interface(self: *const @This()) Template {
+        return Template{ .self = self, .formatFn = &format };
+    }
+};
+
+pub const Error = struct {
+    message: []const u8,
+
+    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll("Error");
+    }
+
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try w.print(
+            \\<a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
+            \\<div style="padding: 2pt; color: white; background: red; max-width: 80rem">
+            \\  <h3 style="margin: 0">Error</h3>
+            \\  <p style="margin: 0">{s}</p>
+            \\</div>
+        , .{s.message});
+    }
+
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Base{
+            .self = self,
+            .formatTitleFn = &formatTitle,
+            .formatBodyFn = &formatBody,
         }).interface().format(w);
     }
 
