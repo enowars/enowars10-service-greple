@@ -152,7 +152,7 @@ fn getURL(req: *const httpz.Request, res: *httpz.Response) !void {
 }
 
 fn getHelp(_: *const httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.Help{}).interface());
+    try templates.respond(res, (templates.SearchTips{}).interface());
 }
 
 fn getLogoGif(_: *const httpz.Request, res: *httpz.Response) !void {

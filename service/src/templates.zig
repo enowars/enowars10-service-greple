@@ -98,36 +98,93 @@ pub const Index = struct {
     }
 };
 
+const Columns = struct {
+    self: *const anyopaque,
+    formatTitleFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
+    formatHeaderFn: ?*const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void = null,
+    formatTOCFn: ?*const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void = null,
+    formatMainFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
+
+    fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try s.formatTitleFn(s.self, w);
+    }
+
+    fn formatHeader(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        if (s.formatHeaderFn) |f| return f(s.self, w);
+        try w.print(
+            \\<h1 style="font-size:1rem;padding:2pt;color:white;background:#336699;width:100%">{f}</h1>
+        , .{Template{ .self = s.self, .formatFn = s.formatTitleFn }});
+    }
+
+    fn formatTOC(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        if (s.formatTOCFn) |f| try w.print(
+            \\    <p><b>Table of Contents</b></p>
+            \\    <ul style="display:flex;flex-direction:column;gap:.5rem;padding-left:1.5rem">{f}</ul>
+        , .{Template{ .self = s.self, .formatFn = f }});
+    }
+
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try w.print(
+            \\<div style="display:grid;grid-template:5rem auto/12.5rem 67rem;gap:.5rem;align-items:center">
+            \\  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
+            \\  {f}
+            \\  <div style="font-size:small;align-self:start;margin-top:1rem;margin-left:.5rem">
+            \\    <div style="display:flex;flex-direction:column;gap:.5rem">
+            \\      <a href="/">Home</a>
+            \\      <a href="/console">Search Console</a>
+            \\      <a href="/preferences">Preferences</a>
+            \\      <a href="/help">Search Tips</a>
+            \\    </div>
+            \\    {f}
+            \\  </div>
+            \\  <div style="align-self:start">{f}</div>
+            \\</div>
+        , .{
+            Template{ .self = self, .formatFn = formatHeader },
+            Template{ .self = self, .formatFn = formatTOC },
+            Template{ .self = s.self, .formatFn = s.formatMainFn },
+        });
+    }
+
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Base{
+            .self = self,
+            .formatTitleFn = &formatTitle,
+            .formatBodyFn = &formatBody,
+        }).interface().format(w);
+    }
+
+    fn interface(self: *const @This()) Template {
+        return Template{ .self = self, .formatFn = &format };
+    }
+};
+
 pub const Search = struct {
     q: []const u8,
     results: *const search.Results,
 
     fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
-        try w.print("Greple Search: {f}", .{Escape{ .string = s.q }});
+        try w.print("Search: {f}", .{Escape{ .string = s.q }});
     }
 
-    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatHeader(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
-            \\<div style="display: flex; align-items: center; max-width: 80rem; gap: .5rem">
-            \\  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
-            \\  <div style="display: flex; flex-direction: column; gap: 1rem; width: fit-content">
-            \\    <div style="display: flex; gap: .5rem; margin-left: 1rem; font-size: small">
-            \\      <a href="/console">Search Console</a>
-            \\      <a href="/preferences">Preferences</a>
-            \\      <a href="/help">Search Tips</a>
-            \\    </div>
-            \\    <form action="/search" style="display: flex; gap: .25rem">
-            \\      <input type="text" name="q" size="31" value="{f}">
-            \\      <input type="submit" name="btnG" value="Greple Search">
-            \\      <input type="submit" name="btnI" value="I'm Feeling Lucky"><br>
-            \\    </form>
+            \\<div style="display:flex;flex-direction:column;gap:.75rem">
+            \\  <form action="/search" style="display:flex;gap:.25rem">
+            \\    <input type="text" name="q" size="32" value="{f}">
+            \\    <input type="submit" name="btnG" value="Greple Search">
+            \\    <input type="submit" name="btnI" value="I'm Feeling Lucky"><br>
+            \\  </form>
+            \\  <div style="padding:2pt;color:white;background:#3366cc;display:flex;justify-content:space-between">
+            \\    <small>Searched the web for <b>{f}</b>.</small>
+            \\    <small>Results <b>{d} - {d}</b> of about <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
             \\  </div>
-            \\</div>
-            \\<div style="padding: 2pt; color: white; background: #3366cc; max-width: 80rem; display: flex; justify-content: space-between">
-            \\  <small>Searched the web for <b>{f}</b>.</small>
-            \\  <small>Results <b>{d} - {d}</b> of about <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
             \\</div>
         , .{
             Escape{ .string = s.q },
@@ -137,6 +194,10 @@ pub const Search = struct {
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });
+    }
+
+    fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
         for (s.results.results) |d| try w.print(
             \\<p>
             \\  <a href="http://{f}">{f}</a>
@@ -158,59 +219,15 @@ pub const Search = struct {
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
-        try (Base{
+        try (Columns{
             .self = self,
             .formatTitleFn = &formatTitle,
-            .formatBodyFn = &formatBody,
+            .formatHeaderFn = &formatHeader,
+            .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
-    }
-};
-
-const Columns = struct {
-    self: *const anyopaque,
-    formatTitleFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
-    formatTOCFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
-    formatMainFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
-
-    fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
-        const s: *const @This() = @ptrCast(@alignCast(self));
-        try s.formatTitleFn(s.self, w);
-    }
-
-    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
-        const s: *const @This() = @ptrCast(@alignCast(self));
-        try w.print(
-            \\<div style="display: flex; align-items: center; max-width: 80rem; gap: .5rem">
-            \\  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
-            \\  <h1 style="font-size: 1rem; padding: 2pt; color: white; background: #336699; width: 100%;">{f}</h1>
-            \\</div>
-            \\<div style="display: flex; gap: .5rem">
-            \\  <div style="width: 12.5rem; font-size: small; padding-top: 1rem">
-            \\    <b>Table of Contents</b>
-            \\    <ul style="display: flex; flex-direction: column; gap: .5rem; padding-left: 1.5rem">{f}</ul>
-            \\  </div>
-            \\  <div style="max-width: 67rem">{f}</div>
-            \\</div>
-        , .{
-            Template{ .self = s.self, .formatFn = s.formatTitleFn },
-            Template{ .self = s.self, .formatFn = s.formatTOCFn },
-            Template{ .self = s.self, .formatFn = s.formatMainFn },
-        });
-    }
-
-    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
-        try (Base{
-            .self = self,
-            .formatTitleFn = &formatTitle,
-            .formatBodyFn = &formatBody,
-        }).interface().format(w);
-    }
-
-    fn interface(self: *const @This()) Template {
         return Template{ .self = self, .formatFn = &format };
     }
 };
@@ -327,9 +344,9 @@ pub const SearchConsole = struct {
     }
 };
 
-pub const Help = struct {
+pub const SearchTips = struct {
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
-        try w.writeAll("Grepl Search Tips");
+        try w.writeAll("Search Tips");
     }
 
     fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
@@ -344,7 +361,7 @@ pub const Help = struct {
     }
 
     fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
-        try w.writeAll(@embedFile("static/help.html"));
+        try w.writeAll(@embedFile("static/search_tips.html"));
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
