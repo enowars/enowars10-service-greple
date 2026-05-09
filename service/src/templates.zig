@@ -304,6 +304,7 @@ pub const SearchConsole = struct {
     }
 
     fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
+        // TODO: fix duplicate form field name
         try w.writeAll(
             \\<a name="domains"><b>Domains</b></a>
             \\<p>TODO Your domains</p>

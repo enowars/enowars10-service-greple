@@ -1,5 +1,8 @@
 const httpz = @import("httpz");
 const std = @import("std");
+const utils = @import("utils.zig");
+
+const key = "change me";
 
 pub const user_nobody = "nobody";
 pub const user_anybody = "anybody";
@@ -16,60 +19,80 @@ pub const Preferences = struct {
     }
 };
 
+const Hmac = std.crypto.auth.hmac.sha2.HmacSha224;
+
 pub fn parse(req: *const httpz.Request) !Preferences {
     var prefs: Preferences = .{};
-    var password: []const u8 = "";
+
+    if (req.cookies().get("user")) |u| if (req.cookies().get("hmac")) |h| {
+        var hmac_bytes: [Hmac.mac_length]u8 = undefined;
+        Hmac.create(&hmac_bytes, u, key);
+        const hmac = std.fmt.bytesToHex(&hmac_bytes, .lower);
+        if (std.mem.eql(u8, h, &hmac)) prefs.user = u;
+    };
 
     if (req.cookies().get("preferences")) |c| {
         var it = std.mem.splitScalar(u8, c, '&');
         while (it.next()) |kv| {
             if (std.mem.indexOfScalarPos(u8, kv, 0, '=')) |s| {
-                var dupe = try req.arena.dupe(u8, kv);
-                for (dupe) |*x| if (x.* == '+') {
-                    x.* = ' ';
-                };
-                const key = std.Uri.percentDecodeInPlace(dupe[0..s]);
-                const value = std.Uri.percentDecodeInPlace(dupe[s + 1 ..]);
+                var d = try req.arena.dupe(u8, kv);
+                const k = std.Uri.percentDecodeInPlace(d[0..s]);
+                const v = std.Uri.percentDecodeInPlace(d[s + 1 ..]);
 
-                if (std.mem.eql(u8, key, "user")) {
-                    prefs.user = value;
-                } else if (std.mem.eql(u8, key, "password")) {
-                    password = value;
-                } else if (std.mem.eql(u8, key, "safe_search_enabled")) {
+                if (std.mem.eql(u8, k, "safe_search_enabled")) {
                     prefs.safe_search_enabled = true;
-                } else if (std.mem.eql(u8, key, "safe_search_regex")) {
-                    prefs.safe_search_regex = value;
+                } else if (std.mem.eql(u8, k, "safe_search_regex")) {
+                    prefs.safe_search_regex = v;
                 }
             }
         }
     }
 
-    if (!blk: {
-        if (std.mem.eql(u8, prefs.user, user_anybody)) break :blk false;
-        if (std.mem.eql(u8, prefs.user, user_nobody)) break :blk false;
-        if (password.len == 0) break :blk false;
+    return prefs;
+}
 
-        var hash: [20]u8 = undefined;
-        std.crypto.hash.Sha1.hash(prefs.user, &hash, .{});
-        const sha1 = std.fmt.bytesToHex(hash, .lower);
+pub fn login(user: []const u8, password: []const u8, res: *httpz.Response) !void {
+    std.debug.assert(password.len > 0);
+    if (std.mem.eql(u8, user, user_anybody)) return error.InvalidCredentials;
+    if (std.mem.eql(u8, user, user_nobody)) return error.InvalidCredentials;
 
-        var dir = try std.fs.cwd().openDir("users", .{});
-        defer dir.close();
+    var hash_bytes: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+    std.crypto.hash.Sha1.hash(user, &hash_bytes, .{});
+    const hash = std.fmt.bytesToHex(hash_bytes, .lower);
 
-        var file = try dir.createFile(&sha1, .{ .read = true, .truncate = false });
-        defer file.close();
+    var dir = try std.fs.cwd().openDir("users", .{});
+    defer dir.close();
 
-        const size = (try file.stat()).size;
-        if (size == 0) {
-            try file.writeAll(password);
-            break :blk true;
-        }
-        if (size != password.len) break :blk false;
+    var file = try dir.createFile(&hash, .{ .read = true, .truncate = false });
+    defer file.close();
+
+    const size = (try file.stat()).size;
+    if (size == 0) {
+        try file.writeAll(password);
+    } else {
+        if (size != password.len) return error.InvalidCredentials;
 
         var reader = file.reader(&.{});
-        const expected = try reader.interface.readAlloc(req.arena, size);
-        break :blk std.mem.eql(u8, password, expected);
-    }) prefs.user = user_nobody;
+        const expected = try reader.interface.readAlloc(res.arena, size);
+        defer res.arena.free(expected);
 
-    return prefs;
+        if (!std.mem.eql(u8, password, expected)) return error.InvalidCredentials;
+    }
+
+    var user_cookie: std.Io.Writer.Allocating = .init(res.arena);
+    defer user_cookie.deinit();
+
+    try user_cookie.writer.writeAll("user=");
+    try std.Uri.Component.percentEncode(&user_cookie.writer, user, utils.cookieValidChar);
+
+    res.headers.add("Set-Cookie", try user_cookie.toOwnedSlice());
+
+    var hmac_bytes: [Hmac.mac_length]u8 = undefined;
+    Hmac.create(&hmac_bytes, user, key);
+    const hmac = std.fmt.bytesToHex(hmac_bytes, .lower);
+
+    const hmac_cookie = try std.mem.concat(res.arena, u8, &.{ "hmac=", &hmac });
+    errdefer res.arena.free(hmac_cookie);
+
+    res.headers.add("Set-Cookie", hmac_cookie);
 }

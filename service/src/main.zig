@@ -6,6 +6,7 @@ const search = @import("search.zig");
 const std = @import("std");
 const templates = @import("templates.zig");
 const urls = @import("urls.zig");
+const utils = @import("utils.zig");
 
 var server_instance: ?*httpz.Server(void) = null;
 
@@ -135,11 +136,53 @@ fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Preferences{ .prefs = &prefs }).interface());
 }
 
-fn postPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
-    if (req.body()) |b| res.headers.add(
-        "Set-Cookie",
-        try std.mem.concat(res.arena, u8, &.{ "preferences=", b }),
-    );
+fn preferencesCookieValidChar(char: u8) bool {
+    return switch (char) {
+        '&' => false,
+        else => |c| utils.cookieValidChar(c),
+    };
+}
+
+fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
+    const data = try req.formData();
+
+    const user, const password, const safe_search_enabled, const safe_search_regex = (blk: {
+        break :blk .{
+            data.get("user") orelse break :blk error.InvalidRequest,
+            data.get("password") orelse break :blk error.InvalidRequest,
+            data.has("safe_search_enabled"),
+            data.get("safe_search_regex") orelse break :blk error.InvalidRequest,
+        };
+    }) catch |err| switch (err) {
+        error.InvalidRequest => return templates.respond(res, (templates.Message{
+            .title = "Preferences: Error",
+            .message = "Invalid request.",
+            .is_error = true,
+        }).interface()),
+        else => |leftover_err| return leftover_err,
+    };
+
+    if (password.len > 0) preferences.login(user, password, res) catch |err| switch (err) {
+        error.InvalidCredentials => try templates.respond(res, (templates.Message{
+            .title = "Preferences: Error",
+            .message = "Invalid credentials.",
+            .is_error = true,
+        }).interface()),
+        else => |leftover_err| return leftover_err,
+    };
+
+    var cookie: std.Io.Writer.Allocating = .init(res.arena);
+    defer cookie.deinit();
+
+    try cookie.writer.writeAll("preferences=");
+
+    if (safe_search_enabled) try cookie.writer.writeAll("safe_search_enabled=on&");
+
+    try cookie.writer.writeAll("safe_search_regex=");
+    try std.Uri.Component.percentEncode(&cookie.writer, safe_search_regex, preferencesCookieValidChar);
+
+    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+
     res.status = 302;
     res.headers.add("Location", req.url.path);
 }

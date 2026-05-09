@@ -9,7 +9,7 @@ import re
 import string
 from collections.abc import Sequence
 from html import escape
-from urllib.parse import quote, quote_plus, unquote, urlencode
+from urllib.parse import quote, unquote, urlencode
 
 import fastapi
 import httpx
@@ -47,9 +47,8 @@ _SHORT_URL_REGEX = (
 )
 
 
-def app() -> fastapi.FastAPI:
-    """Return app to gunicorn."""
-    return _CHECKER.app
+def _cookieencode(query: dict[str, str]) -> str:
+    return urlencode(query, quote_via=quote)
 
 
 def _noise(entropy: int, alphabet: Sequence[str], sep: str) -> str:
@@ -65,28 +64,36 @@ def _words(entropy: int = _ENTROPY) -> str:
     return _noise(entropy, _WORDS, " ")
 
 
-async def _login_or_register(
-    client: httpx.AsyncClient,
-    user: str,
-    password: str,
-) -> None:
+async def _register(client: httpx.AsyncClient, user: str) -> str:
     res = await client.get("/preferences")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/preferences",
-        data={"user": user, "password": password, "safe_search_regex": "xxx"},
+        data={"user": user, "password": _alnum(), "safe_search_regex": "xxx"},
     )
     assert_equals(res.status_code, 302, "Unexpected HTTP status")
     if res.next_request is None:
         raise MumbleException("No redirect")
-    cookie = res.cookies.get("preferences")
-    assert_in(f"user={quote_plus(user)}", cookie, "Unexpected cookie value")
-    assert_in(f"password={quote_plus(password)}", cookie, "Unexpected cookie value")
+
+    assert_in("user", res.cookies, "No user cookie")
+    assert_equals(quote(user), res.cookies["user"], "Unexpected user cookie value")
+
+    assert_in("hmac", res.cookies, "No hmac cookie")
+    hmac = res.cookies["hmac"]
+
+    assert_in("preferences", res.cookies, "No preferences cookie")
+    assert_equals(
+        _cookieencode({"safe_search_regex": "xxx"}),
+        res.cookies["preferences"],
+        "Unexpected preferences cookie value",
+    )
 
     res = await client.send(res.next_request)
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
     assert_in(f'value="{escape(user)}"', res.text, "Unexpected form value")
+
+    return hmac
 
 
 async def _submit_page(
@@ -151,8 +158,7 @@ async def _putflag(
     db: ChainDB,
 ) -> str:
     user = _alnum()
-    password = _alnum()
-    await _login_or_register(client, user, password)
+    hmac = await _register(client, user)
 
     url = await _shorten_url(client, f"{_FLAG_URL_PREFIX}{quote(task.flag)}")
 
@@ -165,7 +171,7 @@ async def _putflag(
     )
 
     await db.set("user", user)
-    await db.set("password", password)
+    await db.set("hmac", hmac)
     await db.set("text", text)
 
     return text
@@ -179,12 +185,14 @@ async def _getflag(
 ) -> None:
     try:
         user = await db.get("user")
-        password = await db.get("password")
+        hmac = await db.get("hmac")
         text = await db.get("text")
     except KeyError as e:
         raise MumbleException("Missing putflag data in DB") from e
 
-    await _login_or_register(client, user, password)
+    client.cookies["user"] = user
+    client.cookies["hmac"] = hmac
+    client.cookies["preferences"] = _cookieencode({"safe_search_regex": "xxx"})
 
     res = await _search(client, text)
     short_url = re.search(_SHORT_URL_REGEX, res.text)
@@ -202,14 +210,14 @@ async def _test_for_regex_match(client: httpx.AsyncClient, q: str, regex: str) -
     res = await client.get(
         "/search?" + urlencode({"q": q}),
         cookies={
-            "preferences": urlencode(
+            "preferences": _cookieencode(
                 {"safe_search_enabled": "on", "safe_search_regex": redos + regex},
             ),
         },
     )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
-    t = re.search(r"[0-9]\.[0-9]{2}", res.text)
+    t = re.search(r"\b[0-9]\.[0-9]{2}\b", res.text)
     if not t:
         raise MumbleException("Failed to find timing output")
     return float(t[0]) < 0.1
@@ -279,3 +287,8 @@ async def _exploit_sca(
             return flag
 
     return None
+
+
+def app() -> fastapi.FastAPI:
+    """Return app to gunicorn."""
+    return _CHECKER.app
