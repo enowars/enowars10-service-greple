@@ -163,7 +163,7 @@ fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
     };
 
     if (password.len > 0) preferences.login(user, password, res) catch |err| switch (err) {
-        error.InvalidCredentials => try templates.respond(res, (templates.Message{
+        error.InvalidCredentials => return templates.respond(res, (templates.Message{
             .title = "Preferences: Error",
             .message = "Invalid credentials.",
             .is_error = true,

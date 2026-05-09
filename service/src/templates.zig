@@ -389,22 +389,21 @@ pub const Message = struct {
         try w.writeAll(s.title);
     }
 
-    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
-            \\<a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
-            \\<p style="padding:2pt;max-width:80rem{s}">{s}</p>
+            \\<p style="padding:2pt{s}">{s}</p>
         , .{
-            if (s.is_error) ";color:white;background:red" else "",
+            if (s.is_error) ";color:white;background:#d7452f" else "",
             s.message,
         });
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
-        try (Base{
+        try (Columns{
             .self = self,
             .formatTitleFn = &formatTitle,
-            .formatBodyFn = &formatBody,
+            .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
