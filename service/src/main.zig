@@ -117,13 +117,9 @@ fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     const data = try req.formData();
 
     (blk: {
-        if (data.has("form_submit")) {
-            try postSearchConsoleSubmit(res, &prefs, data);
-        } else if (data.has("form_url")) {
-            try postSearchConsoleURL(res, data);
-        } else {
-            break :blk error.InvalidRequest;
-        }
+        if (data.has("form_submit")) break :blk postSearchConsoleSubmit(res, &prefs, data);
+        if (data.has("form_url")) break :blk postSearchConsoleURL(res, data);
+        break :blk error.InvalidRequest;
     }) catch |err| switch (err) {
         error.InvalidRequest => try templates.respond(res, (templates.Message{
             .title = "Search Console: Error",
@@ -177,7 +173,7 @@ pub fn main() !void {
 
     var server: httpz.Server(void) = try .init(allocator, .{
         .address = .all(7777),
-        .request = .{ .max_form_count = 3 },
+        .request = .{ .max_form_count = 5 },
     }, {});
     defer {
         server.stop();

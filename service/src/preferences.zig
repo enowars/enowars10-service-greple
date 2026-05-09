@@ -25,6 +25,9 @@ pub fn parse(req: *const httpz.Request) !Preferences {
         while (it.next()) |kv| {
             if (std.mem.indexOfScalarPos(u8, kv, 0, '=')) |s| {
                 var dupe = try req.arena.dupe(u8, kv);
+                for (dupe) |*x| if (x.* == '+') {
+                    x.* = ' ';
+                };
                 const key = std.Uri.percentDecodeInPlace(dupe[0..s]);
                 const value = std.Uri.percentDecodeInPlace(dupe[s + 1 ..]);
 
