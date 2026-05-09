@@ -44,6 +44,8 @@ const Base = struct {
             \\  <style>
             \\    *{{box-sizing:border-box}}
             \\    body{{font-family:Arial,sans-serif}}
+            \\    .form{{display:grid;grid-template-columns:repeat(2,min-content);justify-items:flex-start;gap:.25rem;margin:1rem 0}}
+            \\    .form>[type="submit"]{{grid-column:1/3}}
             \\  </style>
             \\</head>
             \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">{f}</body>
@@ -232,7 +234,8 @@ pub const Preferences = struct {
         try w.print(
             \\<form method="POST">
             \\  <a name="user_account"><b>User Account</b></a>
-            \\  <div style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem; margin: 1rem 0">
+            \\  <p>Login into a Greple account to access the search console. If you don't have an account, use the same form to register.</p>
+            \\  <div class="form">
             \\    <label for="user">Username:</label>
             \\    <input id="user" name="user" size="32" value="{f}">
             \\    <label for="password">Password:</label>
@@ -240,7 +243,7 @@ pub const Preferences = struct {
             \\  </div>
             \\  <a name="safe_search"><b>Safe Search</b></a>
             \\  <p>Filter out search results matching a defined regular expression.</p>
-            \\  <div style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem">
+            \\  <div class="form">
             \\    <label for="safe_search_enabled">Enabled:</label>
             \\    <input id="safe_search_enabled" type="checkbox" name="safe_search_enabled"{s}>
             \\    <label for="safe_search_regex">Regex:</label>
@@ -276,22 +279,36 @@ pub const SearchConsole = struct {
 
     fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
+            \\<li><a href="#domains">Domains</a></li>
+            \\<li><a href="#register">Register Domain</a></li>
             \\<li><a href="#submit">Submit Page</a></li>
+            \\<li><a href="#url">URL Shortener</a></li>
         );
     }
 
     fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
+            \\<a name="domains"><b>Domains</b></a>
+            \\<p>TODO Your domains</p>
+            \\<a name="register"><b>Register Domain</b></a>
+            \\<p>TODO Register a domain</p>
             \\<a name="submit"><b>Submit Page</b></a>
             \\<p>Submit a page to be crawled and added to the search index.</p>
-            \\<form method="POST" style="display: grid; grid-template-columns: repeat(2, min-content); justify-items: flex-start; gap: .25rem">
+            \\<form method="POST" class="form">
+            \\  <label for="public">Public:</label>
+            \\  <input id="public" name="public" type="checkbox" checked>
             \\  <label for="url">URL:</label>
             \\  <input id="url" name="url" size="32">
-            \\  <label for="title">Title:</label>
-            \\  <input id="title" name="title" size="32">
-            \\  <label for="text">Text:</label>
-            \\  <textarea id="text" name="text" rows="16" cols="64"></textarea>
-            \\  <input type="submit" value="Submit" style="grid-column: 1 / 3">
+            \\  <input type="hidden" name="title" value="Lorem ipsum">
+            \\  <input type="hidden" name="text" value="Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.">
+            \\  <input type="submit" name="form_submit" value="Submit">
+            \\</form>
+            \\<a name="url"><b>URL Shortener</b></a>
+            \\<p>Input an URL to generate an easy to remember short URL.</p>
+            \\<form method="POST" class="form">
+            \\  <label for="url">URL:</label>
+            \\  <input id="url" name="url" size="32">
+            \\  <input type="submit" name="form_url" value="Shorten">
             \\</form>
         );
     }
@@ -344,22 +361,25 @@ pub const Help = struct {
     }
 };
 
-pub const Error = struct {
+pub const Message = struct {
+    title: []const u8,
     message: []const u8,
+    is_error: bool,
 
-    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
-        try w.writeAll("Error");
+    fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try w.writeAll(s.title);
     }
 
     fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
-            \\<div style="padding: 2pt; color: white; background: red; max-width: 80rem">
-            \\  <h3 style="margin: 0">Error</h3>
-            \\  <p style="margin: 0">{s}</p>
-            \\</div>
-        , .{s.message});
+            \\<p style="padding:2pt;max-width:80rem{s}">{s}</p>
+        , .{
+            if (s.is_error) ";color:white;background:red" else "",
+            s.message,
+        });
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {

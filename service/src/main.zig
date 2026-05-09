@@ -5,6 +5,7 @@ const query = @import("query.zig");
 const search = @import("search.zig");
 const std = @import("std");
 const templates = @import("templates.zig");
+const urls = @import("urls.zig");
 
 var server_instance: ?*httpz.Server(void) = null;
 
@@ -63,11 +64,13 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
 
 fn checkLogin(prefs: *const preferences.Preferences, res: *httpz.Response) !bool {
     if (std.mem.eql(u8, prefs.user, preferences.user_nobody)) {
-        try templates.respond(res, (templates.Error{
+        try templates.respond(res, (templates.Message{
+            .title = "Error",
             .message =
             \\You are not allowed to access this page.
-            \\Login in <a href="/preferences" style="color: white">preferences</a>.
+            \\Login using <a href="/preferences" style="color: white">preferences</a>.
             ,
+            .is_error = true,
         }).interface());
         return false;
     }
@@ -80,19 +83,55 @@ fn getSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.SearchConsole{}).interface());
 }
 
+fn postSearchConsoleSubmit(res: *httpz.Response, prefs: *const preferences.Preferences, data: *const httpz.key_value.StringKeyValue) !void {
+    // TODO: allow public entries
+    const public = data.has("public");
+    _ = public;
+    const url = data.get("url") orelse return error.InvalidRequest;
+    const title = data.get("title") orelse return error.InvalidRequest;
+    const text = data.get("text") orelse return error.InvalidRequest;
+
+    try index.writeEntry(res.arena, prefs, url, title, text);
+
+    try templates.respond(res, (templates.Message{
+        .title = "Search Console: Submitted Page",
+        .message = "The page has been submitted for indexing.",
+        .is_error = false,
+    }).interface());
+}
+
+fn postSearchConsoleURL(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
+    const url = data.get("url") orelse return error.InvalidRequest;
+    const hash = try urls.writeURL(url);
+    try templates.respond(res, (templates.Message{
+        .title = "Search Console: Shortened URL",
+        .message = &hash,
+        .is_error = false,
+    }).interface());
+}
+
 fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     const prefs = try preferences.parse(req);
     if (!try checkLogin(&prefs, res)) return;
 
     const data = try req.formData();
-    const url = data.get("url") orelse return;
-    const title = data.get("title") orelse return;
-    const text = data.get("text") orelse return;
 
-    try index.writeEntry(res.arena, &prefs, url, title, text);
-
-    res.status = 302;
-    res.headers.add("Location", req.url.path);
+    (blk: {
+        if (data.has("form_submit")) {
+            try postSearchConsoleSubmit(res, &prefs, data);
+        } else if (data.has("form_url")) {
+            try postSearchConsoleURL(res, data);
+        } else {
+            break :blk error.InvalidRequest;
+        }
+    }) catch |err| switch (err) {
+        error.InvalidRequest => try templates.respond(res, (templates.Message{
+            .title = "Search Console: Error",
+            .message = "Invalid request.",
+            .is_error = true,
+        }).interface()),
+        else => |leftover_err| return leftover_err,
+    };
 }
 
 fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
@@ -107,6 +146,13 @@ fn postPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
     );
     res.status = 302;
     res.headers.add("Location", req.url.path);
+}
+
+fn getURL(req: *const httpz.Request, res: *httpz.Response) !void {
+    const hash = req.param("hash") orelse return error.InvalidRequest;
+    const url = try urls.getURL(req.arena, hash);
+    res.status = 302;
+    res.headers.add("Location", url);
 }
 
 fn getHelp(_: *const httpz.Request, res: *httpz.Response) !void {
@@ -145,6 +191,7 @@ pub fn main() !void {
     router.post("/console", postSearchConsole, .{});
     router.get("/preferences", getPreferences, .{});
     router.post("/preferences", postPreferences, .{});
+    router.get("/u/:hash", getURL, .{});
     router.get("/help", getHelp, .{});
     router.get("/static/logo.gif", getLogoGif, .{});
 
