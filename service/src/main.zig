@@ -19,7 +19,7 @@ fn shutdown(_: i32) callconv(.c) noreturn {
 }
 
 fn getIndex(_: *const httpz.Request, res: *httpz.Response) !void {
-    var dir = try index.getDir(true);
+    var dir = try index.indexDir(true);
     defer dir.close();
 
     var index_size: u32 = 0;
@@ -64,7 +64,7 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn checkLogin(prefs: *const preferences.Preferences, res: *httpz.Response) !bool {
-    if (std.mem.eql(u8, prefs.user, preferences.user_nobody)) {
+    if (prefs.user_account_user == null) {
         try templates.respond(res, (templates.Message{
             .title = "Error",
             .message =
@@ -84,15 +84,25 @@ fn getSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.SearchConsole{}).interface());
 }
 
-fn postSearchConsoleSubmit(res: *httpz.Response, prefs: *const preferences.Preferences, data: *const httpz.key_value.StringKeyValue) !void {
-    // TODO: allow public entries
+fn postSearchConsoleSubmitPage(
+    res: *httpz.Response,
+    prefs: *const preferences.Preferences,
+    data: *const httpz.key_value.StringKeyValue,
+) !void {
     const public = data.has("public");
-    _ = public;
     const url = data.get("url") orelse return error.InvalidRequest;
     const title = data.get("title") orelse return error.InvalidRequest;
     const text = data.get("text") orelse return error.InvalidRequest;
 
-    try index.writeEntry(res.arena, prefs, url, title, text);
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(res.arena);
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |l| {
+        if (l.len == 0) continue;
+        try lines.append(res.arena, l);
+    }
+
+    try index.writeEntry(res.arena, prefs, public, url, title, lines.items);
 
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Submitted Page",
@@ -101,7 +111,7 @@ fn postSearchConsoleSubmit(res: *httpz.Response, prefs: *const preferences.Prefe
     }).interface());
 }
 
-fn postSearchConsoleURL(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
+fn postSearchConsoleShortenURL(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
     const url = data.get("url") orelse return error.InvalidRequest;
     const hash = try urls.writeURL(url);
     try templates.respond(res, (templates.Message{
@@ -118,8 +128,8 @@ fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
     const data = try req.formData();
 
     (blk: {
-        if (data.has("form_submit")) break :blk postSearchConsoleSubmit(res, &prefs, data);
-        if (data.has("form_url")) break :blk postSearchConsoleURL(res, data);
+        if (data.has("form_submit_page")) break :blk postSearchConsoleSubmitPage(res, &prefs, data);
+        if (data.has("form_shorten_url")) break :blk postSearchConsoleShortenURL(res, data);
         break :blk error.InvalidRequest;
     }) catch |err| switch (err) {
         error.InvalidRequest => try templates.respond(res, (templates.Message{
@@ -136,33 +146,23 @@ fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Preferences{ .prefs = &prefs }).interface());
 }
 
-fn preferencesCookieValidChar(char: u8) bool {
+fn cookieValidChar(char: u8) bool {
     return switch (char) {
         '&' => false,
         else => |c| utils.cookieValidChar(c),
     };
 }
 
-fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
-    const data = try req.formData();
+fn postPreferencesUserAccount(
+    req: *const httpz.Request,
+    res: *httpz.Response,
+    data: *const httpz.key_value.StringKeyValue,
+) !void {
+    const user = data.get("user") orelse return error.InvalidRequest;
+    const password = data.get("password") orelse return error.InvalidRequest;
+    if (user.len == 0 or password.len == 0) return error.InvalidRequest;
 
-    const user, const password, const safe_search_enabled, const safe_search_regex = (blk: {
-        break :blk .{
-            data.get("user") orelse break :blk error.InvalidRequest,
-            data.get("password") orelse break :blk error.InvalidRequest,
-            data.has("safe_search_enabled"),
-            data.get("safe_search_regex") orelse break :blk error.InvalidRequest,
-        };
-    }) catch |err| switch (err) {
-        error.InvalidRequest => return templates.respond(res, (templates.Message{
-            .title = "Preferences: Error",
-            .message = "Invalid request.",
-            .is_error = true,
-        }).interface()),
-        else => |leftover_err| return leftover_err,
-    };
-
-    if (password.len > 0) preferences.login(user, password, res) catch |err| switch (err) {
+    const hmac = preferences.login(user, password) catch |err| switch (err) {
         error.InvalidCredentials => return templates.respond(res, (templates.Message{
             .title = "Preferences: Error",
             .message = "Invalid credentials.",
@@ -174,17 +174,53 @@ fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
     var cookie: std.Io.Writer.Allocating = .init(res.arena);
     defer cookie.deinit();
 
-    try cookie.writer.writeAll("preferences=");
-
-    if (safe_search_enabled) try cookie.writer.writeAll("safe_search_enabled=on&");
-
-    try cookie.writer.writeAll("safe_search_regex=");
-    try std.Uri.Component.percentEncode(&cookie.writer, safe_search_regex, preferencesCookieValidChar);
-
-    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+    try cookie.writer.writeAll("user_account=user=");
+    try std.Uri.Component.percentEncode(&cookie.writer, user, cookieValidChar);
+    try cookie.writer.writeAll("&hmac=");
+    try cookie.writer.printHex(&hmac, .lower);
 
     res.status = 302;
     res.headers.add("Location", req.url.path);
+    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+}
+
+fn postPreferencesSafeSearch(
+    req: *const httpz.Request,
+    res: *httpz.Response,
+    data: *const httpz.key_value.StringKeyValue,
+) !void {
+    const enabled = data.has("enabled");
+    const regex = data.get("regex") orelse return error.InvalidRequest;
+
+    var cookie: std.Io.Writer.Allocating = .init(res.arena);
+    defer cookie.deinit();
+
+    try cookie.writer.writeAll("safe_search=");
+
+    if (enabled) try cookie.writer.writeAll("enabled=on&");
+
+    try cookie.writer.writeAll("regex=");
+    try std.Uri.Component.percentEncode(&cookie.writer, regex, cookieValidChar);
+
+    res.status = 302;
+    res.headers.add("Location", req.url.path);
+    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+}
+
+fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
+    const data = try req.formData();
+    (blk: {
+        if (data.has("form_user_account")) break :blk postPreferencesUserAccount(req, res, data);
+        if (data.has("form_safe_search")) break :blk postPreferencesSafeSearch(req, res, data);
+        break :blk error.InvalidRequest;
+    }) catch |err| switch (err) {
+        error.InvalidRequest => try templates.respond(res, (templates.Message{
+            .title = "Preferences: Error",
+            .message = "Invalid request.",
+            .is_error = true,
+        }).interface()),
+        else => |leftover_err| return leftover_err,
+    };
 }
 
 fn getURL(req: *const httpz.Request, res: *httpz.Response) !void {

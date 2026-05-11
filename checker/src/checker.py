@@ -8,7 +8,7 @@ import re
 import string
 from collections.abc import Sequence
 from html import escape
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import parse_qs, quote, unquote, urlencode
 
 import fastapi
 import httpx
@@ -36,7 +36,7 @@ _REGEX_ESCAPE = {ord(c): rf"\{c}" for c in r"^$.*?+{|()\["}
 # TODO: add url prefix
 _SHORT_URL_PREFIX = ""
 _SHORT_URL_ALPHABET = string.digits + string.ascii_lowercase[: 16 - len(string.digits)]
-_SHORT_URL_LENGTH = 8
+_SHORT_URL_LENGTH = math.ceil(_ENTROPY / math.log2(len(_SHORT_URL_ALPHABET)))
 _SHORT_URL_REGEX = (
     r"\b"
     f"{_SHORT_URL_PREFIX.translate(_REGEX_ESCAPE)}"
@@ -63,36 +63,36 @@ def _words(entropy: int = _ENTROPY) -> str:
     return _noise(entropy, _WORDS, " ")
 
 
+def _assert_re(regex: str, text: str) -> re.Match[str]:
+    m = re.search(regex, text)
+    if not m:
+        raise MumbleException(f"Regex {regex!r} not found in {text!r}")
+    return m
+
+
 async def _register(client: httpx.AsyncClient, user: str) -> str:
     res = await client.get("/preferences")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/preferences",
-        data={"user": user, "password": _alnum(), "safe_search_regex": "xxx"},
+        data={"user": user, "password": _alnum(), "form_user_account": "Login"},
     )
     assert_equals(res.status_code, 302, "Unexpected HTTP status")
     if res.next_request is None:
         raise MumbleException("No redirect")
-
-    assert_in("user", res.cookies, "No user cookie")
-    assert_equals(quote(user), res.cookies["user"], "Unexpected user cookie value")
-
-    assert_in("hmac", res.cookies, "No hmac cookie")
-    hmac = res.cookies["hmac"]
-
-    assert_in("preferences", res.cookies, "No preferences cookie")
-    assert_equals(
-        _cookieencode({"safe_search_regex": "xxx"}),
-        res.cookies["preferences"],
-        "Unexpected preferences cookie value",
-    )
+    assert_in("user_account", res.cookies, "No user_account cookie")
+    cookie = parse_qs(res.cookies["user_account"])
+    assert_in("user", cookie, "No user cookie")
+    assert_equals(cookie["user"], [user], "Unexpected user cookie")
+    assert_in("hmac", cookie, "No hmac cookie")
+    assert_equals(len(cookie["hmac"]), 1, "Unexpected hmac cookie")
 
     res = await client.send(res.next_request)
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
     assert_in(f'value="{escape(user)}"', res.text, "Unexpected form value")
 
-    return hmac
+    return cookie["hmac"][0]
 
 
 async def _submit_page(
@@ -106,7 +106,7 @@ async def _submit_page(
 
     res = await client.post(
         "/console",
-        data={"url": url, "title": title, "text": text, "form_submit": "Submit"},
+        data={"url": url, "title": title, "text": text, "form_submit_page": "Submit"},
     )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
     assert_in("page has been submitted", res.text, "Unexpected form value")
@@ -116,7 +116,10 @@ async def _shorten_url(client: httpx.AsyncClient, url: str) -> str:
     res = await client.get("/console")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
-    res = await client.post("/console", data={"form_url": "Shorten", "url": url})
+    res = await client.post(
+        "/console",
+        data={"url": url, "form_shorten_url": "Shorten"},
+    )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     short_url = re.search(_SHORT_URL_REGEX, res.text)
@@ -164,7 +167,7 @@ async def _putflag(
     text = _words()
     await _submit_page(
         client,
-        _FLAG_URL_PREFIX.removeprefix("http://"),
+        f"{_FLAG_URL_PREFIX}{quote(_alnum())}",
         _words(_ENTROPY // 2),
         text + " " + url,
     )
@@ -189,9 +192,7 @@ async def _getflag(
     except KeyError as e:
         raise MumbleException("Missing putflag data in DB") from e
 
-    client.cookies["user"] = user
-    client.cookies["hmac"] = hmac
-    client.cookies["preferences"] = _cookieencode({"safe_search_regex": "xxx"})
+    client.cookies["user_account"] = _cookieencode({"user": user, "hmac": hmac})
 
     res = await _search(client, text)
     short_url = re.search(_SHORT_URL_REGEX, res.text)
@@ -209,9 +210,7 @@ async def _test_for_regex_match(client: httpx.AsyncClient, q: str, regex: str) -
     res = await client.get(
         "/search?" + urlencode({"q": q}),
         cookies={
-            "preferences": _cookieencode(
-                {"safe_search_enabled": "on", "safe_search_regex": redos + regex},
-            ),
+            "safe_search": _cookieencode({"enabled": "on", "regex": redos + regex}),
         },
     )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")

@@ -44,8 +44,10 @@ const Base = struct {
             \\  <style>
             \\    *{{box-sizing:border-box}}
             \\    body{{font-family:Arial,sans-serif}}
-            \\    .form{{display:grid;grid-template-columns:repeat(2,min-content);justify-items:flex-start;gap:.25rem;margin:1rem 0}}
+            \\    .form{{display:grid;grid-template-columns:repeat(2,min-content);justify-items:flex-start;gap:.5rem;margin:1rem 0}}
             \\    .form>[type="submit"]{{grid-column:1/3}}
+            \\    a[name]{{display:block;font-weight:bold;margin-top:2rem}}
+            \\    a[name]:first-child{{margin-top:unset}}
             \\  </style>
             \\</head>
             \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">{f}</body>
@@ -121,8 +123,8 @@ const Columns = struct {
     fn formatTOC(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         if (s.formatTOCFn) |f| try w.print(
-            \\    <p><b>Table of Contents</b></p>
-            \\    <ul style="display:flex;flex-direction:column;gap:.5rem;padding-left:1.5rem">{f}</ul>
+            \\<p><b>Table of Contents</b></p>
+            \\<ul style="display:flex;flex-direction:column;gap:.5rem;padding-left:1.5rem">{f}</ul>
         , .{Template{ .self = s.self, .formatFn = f }});
     }
 
@@ -200,7 +202,7 @@ pub const Search = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         for (s.results.results) |d| try w.print(
             \\<p>
-            \\  <a href="http://{f}">{f}</a>
+            \\  <a href="{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
             \\  <small><font color="green">{f}</font></small>
             \\</p>
@@ -249,27 +251,26 @@ pub const Preferences = struct {
     fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
-            \\<form method="POST">
-            \\  <a name="user_account"><b>User Account</b></a>
-            \\  <p>Login into a Greple account to access the search console. If you don't have an account, use the same form to register.</p>
-            \\  <div class="form">
-            \\    <label for="user">Username:</label>
-            \\    <input id="user" name="user" size="32" value="{f}">
-            \\    <label for="password">Password:</label>
-            \\    <input id="password" name="password" size="32" type="password">
-            \\  </div>
-            \\  <a name="safe_search"><b>Safe Search</b></a>
-            \\  <p>Filter out search results matching a defined regular expression.</p>
-            \\  <div class="form">
-            \\    <label for="safe_search_enabled">Enabled:</label>
-            \\    <input id="safe_search_enabled" type="checkbox" name="safe_search_enabled"{s}>
-            \\    <label for="safe_search_regex">Regex:</label>
-            \\    <input id="safe_search_regex" name="safe_search_regex" size="32" value="{f}">
-            \\  </div>
-            \\  <p><input type="submit" value="Save"></p>
+            \\<a name="user_account">User Account</a>
+            \\<p>Login into a Greple account to access the search console. If you don't have an account, use the same form to register.</p>
+            \\<form method="POST" class="form">
+            \\  <label for="user_account_user">Username:</label>
+            \\  <input id="user_account_user" name="user" size="32" value="{f}">
+            \\  <label for="user_account_password">Password:</label>
+            \\  <input id="user_account_password" name="password" size="32" type="password">
+            \\  <input type="submit" name="form_user_account" value="Login">
+            \\</form>
+            \\<a name="safe_search">Safe Search</a>
+            \\<p>Filter out search results matching a defined regular expression.</p>
+            \\<form method="POST" class="form">
+            \\  <label for="safe_search_enabled">Enabled:</label>
+            \\  <input id="safe_search_enabled" name="enabled" type="checkbox"{s}>
+            \\  <label for="safe_search_regex">Regex:</label>
+            \\  <input id="safe_search_regex" name="regex" size="32" value="{f}">
+            \\  <input type="submit" name="form_safe_search" value="Save">
             \\</form>
         , .{
-            Escape{ .string = s.prefs.user },
+            Escape{ .string = s.prefs.user_account_user orelse "" },
             if (s.prefs.safe_search_enabled) " checked" else "",
             Escape{ .string = s.prefs.safe_search_regex },
         });
@@ -297,36 +298,40 @@ pub const SearchConsole = struct {
     fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
             \\<li><a href="#domains">Domains</a></li>
-            \\<li><a href="#register">Register Domain</a></li>
-            \\<li><a href="#submit">Submit Page</a></li>
-            \\<li><a href="#url">URL Shortener</a></li>
+            \\<li><a href="#register_domain">Register Domain</a></li>
+            \\<li><a href="#submit_page">Submit Page</a></li>
+            \\<li><a href="#shorten_url">Shorten URL</a></li>
         );
     }
 
     fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
-        // TODO: fix duplicate form field name
         try w.writeAll(
-            \\<a name="domains"><b>Domains</b></a>
+            \\<a name="domains">Domains</a>
             \\<p>TODO Your domains</p>
-            \\<a name="register"><b>Register Domain</b></a>
+            \\<a name="register_domain">Register Domain</a>
             \\<p>TODO Register a domain</p>
-            \\<a name="submit"><b>Submit Page</b></a>
+            \\<form method="POST" class="form">
+            \\  <label for="register_domain_domain">Domain:</label>
+            \\  <input id="register_domain_domain" name="domain" size="32">
+            \\  <input type="submit" name="form_register_domain" value="Register">
+            \\</form>
+            \\<a name="submit_page">Submit Page</a>
             \\<p>Submit a page to be crawled and added to the search index.</p>
             \\<form method="POST" class="form">
-            \\  <label for="public">Public:</label>
-            \\  <input id="public" name="public" type="checkbox" checked>
-            \\  <label for="url">URL:</label>
-            \\  <input id="url" name="url" size="32">
+            \\  <label for="submit_page_public">Public:</label>
+            \\  <input id="submit_page_public" name="public" type="checkbox" checked>
+            \\  <label for="submit_page_url">URL:</label>
+            \\  <input id="submit_page_url" name="url" size="32">
             \\  <input type="hidden" name="title" value="Lorem ipsum">
             \\  <input type="hidden" name="text" value="Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.">
-            \\  <input type="submit" name="form_submit" value="Submit">
+            \\  <input type="submit" name="form_submit_page" value="Submit">
             \\</form>
-            \\<a name="url"><b>URL Shortener</b></a>
+            \\<a name="shorten_url">Shorten URL</a>
             \\<p>Input an URL to generate an easy to remember short URL.</p>
             \\<form method="POST" class="form">
-            \\  <label for="url">URL:</label>
-            \\  <input id="url" name="url" size="32">
-            \\  <input type="submit" name="form_url" value="Shorten">
+            \\  <label for="shorten_url_url">URL:</label>
+            \\  <input id="shorten_url_url" name="url" size="32">
+            \\  <input type="submit" name="form_shorten_url" value="Shorten">
             \\</form>
         );
     }

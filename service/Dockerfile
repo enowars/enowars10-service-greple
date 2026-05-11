@@ -8,6 +8,7 @@ RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/
 
 FROM alpine:3.23
 WORKDIR /data
+RUN mkdir documents
 RUN mkdir index
 RUN mkdir urls
 RUN mkdir users

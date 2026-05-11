@@ -1,13 +1,16 @@
 const std = @import("std");
+const utils = @import("utils.zig");
+
+const bits = 64;
 
 fn openDir() !std.fs.Dir {
     return std.fs.cwd().openDir("urls", .{});
 }
 
-pub fn writeURL(url: []const u8) ![8]u8 {
-    var bytes: [20]u8 = undefined;
-    std.crypto.hash.Sha1.hash(url, &bytes, .{});
-    const hash = std.fmt.bytesToHex(bytes[0..4], .lower);
+pub fn writeURL(url: []const u8) ![bits / 4]u8 {
+    var hash_bytes: [utils.Hash.digest_length]u8 = undefined;
+    utils.Hash.hash(url, &hash_bytes, .{});
+    const hash = std.fmt.bytesToHex(hash_bytes[0 .. bits / 8], .lower);
 
     var dir = try openDir();
     defer dir.close();
