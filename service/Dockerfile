@@ -14,7 +14,6 @@ RUN mkdir urls
 RUN mkdir users
 
 FROM scratch
-USER 1000:1000
 WORKDIR /data
 COPY --from=0 /lib/ld-musl-*.so.1 /lib/
 COPY --from=0 /bin/grep /bin/
