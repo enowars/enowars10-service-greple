@@ -1,11 +1,14 @@
+const Document = @import("document.zig");
+const Domain = @import("domain.zig");
 const httpz = @import("httpz");
-const index = @import("index.zig");
-const preferences = @import("preferences.zig");
-const query = @import("query.zig");
+const IndexEntry = @import("index_entry.zig");
+const Query = @import("query.zig");
+const SafeSearch = @import("safe_search.zig");
 const search = @import("search.zig");
 const std = @import("std");
 const templates = @import("templates.zig");
-const urls = @import("urls.zig");
+const Url = @import("url.zig");
+const User = @import("user.zig");
 const utils = @import("utils.zig");
 
 var server_instance: ?*httpz.Server(void) = null;
@@ -18,42 +21,62 @@ fn shutdown(_: i32) callconv(.c) noreturn {
     std.posix.exit(0);
 }
 
+fn errorResponse(res: *httpz.Response, comptime page: []const u8, err: anyerror) !void {
+    var writer: std.Io.Writer.Allocating = .init(res.arena);
+    defer writer.deinit();
+    try writer.writer.writeAll("Error:");
+    for (@errorName(err)) |c| {
+        if (std.ascii.isUpper(c)) try writer.writer.writeByte(' ');
+        try writer.writer.writeByte(c);
+    }
+
+    try templates.respond(res, (templates.Message{
+        .title = page ++ ": Error",
+        .message = try writer.toOwnedSlice(),
+        .is_error = true,
+    }).interface());
+}
+
 fn getIndex(_: *const httpz.Request, res: *httpz.Response) !void {
-    var dir = try index.indexDir(true);
-    defer dir.close();
-
-    var index_size: u32 = 0;
-    var it = dir.iterateAssumeFirstIteration();
-    while (try it.next()) |_| index_size += 1;
-
     try templates.respond(res, (templates.Index{
-        .index_size = index_size,
+        .index_size = try IndexEntry.getSize(),
     }).interface());
 }
 
 fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
-    const prefs = try preferences.parse(req);
+    const user = try User.parse(req);
+    const safe_search = try SafeSearch.parse(req);
 
     const queryParams = try req.query();
     const q = queryParams.get("q") orelse "";
 
     var results = blk: {
-        const pattern = try query.parse(res.arena, q) orelse break :blk search.Results{
+        const query = try Query.init(res.arena, q) orelse break :blk search.Results{
             .results = &.{},
             .time = 0,
             .total = 0,
             .filtered = 0,
         };
-        break :blk try search.performSearch(res.arena, &prefs, pattern);
+        break :blk try search.performSearch(res.arena, user, safe_search, &query);
     };
 
     if (queryParams.has("btnI") and results.results.len > 0) {
+        var writer: std.Io.Writer.Allocating = .init(res.arena);
+        defer writer.deinit();
+        try writer.writer.print(
+            "http://{d}.{d}.{d}.{d}:{d}{s}",
+            .{
+                results.results[0].domain.?.ip[0],
+                results.results[0].domain.?.ip[1],
+                results.results[0].domain.?.ip[2],
+                results.results[0].domain.?.ip[3],
+                results.results[0].domain.?.port,
+                results.results[0].path.?,
+            },
+        );
+
         res.status = 302;
-        res.headers.add("Location", try std.mem.concat(
-            res.arena,
-            u8,
-            &.{ "http://", results.results[0].url.? },
-        ));
+        res.headers.add("Location", try writer.toOwnedSlice());
         return;
     }
 
@@ -63,46 +86,66 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
-fn checkLogin(prefs: *const preferences.Preferences, res: *httpz.Response) !bool {
-    if (prefs.user_account_user == null) {
-        try templates.respond(res, (templates.Message{
-            .title = "Error",
-            .message =
-            \\You are not allowed to access this page.
-            \\Login using <a href="/preferences" style="color: white">preferences</a>.
-            ,
-            .is_error = true,
+fn getSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
+    const user = try User.parse(req);
+    if (user) |*u| {
+        try templates.respond(res, (templates.SearchConsole{
+            .domains = try Domain.getAllOwned(res.arena, u),
         }).interface());
-        return false;
+    } else {
+        try errorResponse(res, "Search Console", error.AccessDenied);
     }
-    return true;
 }
 
-fn getSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
-    const prefs = try preferences.parse(req);
-    if (!try checkLogin(&prefs, res)) return;
-    try templates.respond(res, (templates.SearchConsole{}).interface());
+fn postSearchConsoleRegisterDomain(
+    req: *const httpz.Request,
+    res: *httpz.Response,
+    user: *const User,
+    data: *const httpz.key_value.StringKeyValue,
+) !void {
+    const domain = data.get("domain") orelse return error.InvalidRequest;
+    const ip = data.get("ip") orelse return error.InvalidRequest;
+    const port = data.get("port") orelse return error.InvalidRequest;
+
+    const d: Domain = try .init(user, domain, ip, port);
+    try d.put();
+
+    res.status = 302;
+    res.headers.add("Location", req.url.path);
 }
 
 fn postSearchConsoleSubmitPage(
     res: *httpz.Response,
-    prefs: *const preferences.Preferences,
+    user: *const User,
     data: *const httpz.key_value.StringKeyValue,
 ) !void {
     const public = data.has("public");
-    const url = data.get("url") orelse return error.InvalidRequest;
+    const domain = data.get("domain") orelse return error.InvalidRequest;
+    const path = data.get("path") orelse return error.InvalidRequest;
     const title = data.get("title") orelse return error.InvalidRequest;
     const text = data.get("text") orelse return error.InvalidRequest;
 
-    var lines: std.ArrayList([]const u8) = .empty;
-    defer lines.deinit(res.arena);
-    var it = std.mem.splitScalar(u8, text, '\n');
+    const d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
+    if (!std.mem.eql(u8, &d.user_hash, &user.hash)) return error.AccessDenied;
+
+    const index_entry: IndexEntry = .{
+        .public = public,
+        .domain_hash = d.hash,
+        .path_hash = utils.hash(path),
+        .path = path, // TODO: verify valid path
+        .title = title, // TODO: get from web
+    };
+    try index_entry.put(res.arena);
+
+    // TODO: get from web
+    var t: std.ArrayList([]const u8) = .empty;
+    defer t.deinit(res.arena);
+    var it = std.mem.splitAny(u8, text, "\r\n");
     while (it.next()) |l| {
         if (l.len == 0) continue;
-        try lines.append(res.arena, l);
+        try t.append(res.arena, l);
     }
-
-    try index.writeEntry(res.arena, prefs, public, url, title, lines.items);
+    try (Document{ .text = try t.toOwnedSlice(res.arena) }).put(&index_entry);
 
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Submitted Page",
@@ -111,39 +154,58 @@ fn postSearchConsoleSubmitPage(
     }).interface());
 }
 
-fn postSearchConsoleShortenURL(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
-    const url = data.get("url") orelse return error.InvalidRequest;
-    const hash = try urls.writeURL(url);
+// TODO: use set cookie function instead of manual header
+
+fn postSearchConsoleShortenUrl(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
+    const domain = data.get("domain") orelse return error.InvalidRequest;
+    const path = data.get("path") orelse return error.InvalidRequest;
+
+    var d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
+    defer d.deinit(res.arena);
+
+    const url: Url = try .init(&d, path);
+    try url.put();
+
+    var writer: std.Io.Writer.Allocating = .init(res.arena);
+    defer writer.deinit();
+    // TODO: add http:// host and port
+    try writer.writer.writeAll("/u/");
+    try writer.writer.printHex(&url.hash, .lower);
+
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Shortened URL",
-        .message = &hash,
+        .message = try writer.toOwnedSlice(),
         .is_error = false,
     }).interface());
 }
 
 fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
-    const prefs = try preferences.parse(req);
-    if (!try checkLogin(&prefs, res)) return;
-
-    const data = try req.formData();
-
-    (blk: {
-        if (data.has("form_submit_page")) break :blk postSearchConsoleSubmitPage(res, &prefs, data);
-        if (data.has("form_shorten_url")) break :blk postSearchConsoleShortenURL(res, data);
-        break :blk error.InvalidRequest;
-    }) catch |err| switch (err) {
-        error.InvalidRequest => try templates.respond(res, (templates.Message{
-            .title = "Search Console: Error",
-            .message = "Invalid request.",
-            .is_error = true,
-        }).interface()),
-        else => |leftover_err| return leftover_err,
-    };
+    if (try User.parse(req)) |*u| {
+        const data = try req.formData();
+        (blk: {
+            if (data.has("form_register_domain")) break :blk postSearchConsoleRegisterDomain(req, res, u, data);
+            if (data.has("form_submit_page")) break :blk postSearchConsoleSubmitPage(res, u, data);
+            if (data.has("form_shorten_url")) break :blk postSearchConsoleShortenUrl(res, data);
+            break :blk error.InvalidRequest;
+        }) catch |err| switch (err) {
+            error.AccessDenied,
+            error.InvalidDomain,
+            error.InvalidIp,
+            error.InvalidPort,
+            error.InvalidRequest,
+            error.UrlAlreadyShort,
+            => try errorResponse(res, "Search Console", err),
+            else => |leftover_err| return leftover_err,
+        };
+    } else {
+        try errorResponse(res, "Search Console", error.AccessDenied);
+    }
 }
 
 fn getPreferences(req: *const httpz.Request, res: *httpz.Response) !void {
-    const prefs = try preferences.parse(req);
-    try templates.respond(res, (templates.Preferences{ .prefs = &prefs }).interface());
+    const user = try User.parse(req);
+    const safe_search = try SafeSearch.parse(req);
+    try templates.respond(res, (templates.Preferences{ .user = user, .safe_search = safe_search }).interface());
 }
 
 fn cookieValidChar(char: u8) bool {
@@ -158,26 +220,19 @@ fn postPreferencesUserAccount(
     res: *httpz.Response,
     data: *const httpz.key_value.StringKeyValue,
 ) !void {
-    const user = data.get("user") orelse return error.InvalidRequest;
+    const username = data.get("username") orelse return error.InvalidRequest;
     const password = data.get("password") orelse return error.InvalidRequest;
-    if (user.len == 0 or password.len == 0) return error.InvalidRequest;
+    if (username.len == 0 or password.len == 0) return error.MissingUsernameOrPassword;
 
-    const hmac = preferences.login(user, password) catch |err| switch (err) {
-        error.InvalidCredentials => return templates.respond(res, (templates.Message{
-            .title = "Preferences: Error",
-            .message = "Invalid credentials.",
-            .is_error = true,
-        }).interface()),
-        else => |leftover_err| return leftover_err,
-    };
+    const user: User = try .login(username, password);
 
     var cookie: std.Io.Writer.Allocating = .init(res.arena);
     defer cookie.deinit();
 
-    try cookie.writer.writeAll("user_account=user=");
-    try std.Uri.Component.percentEncode(&cookie.writer, user, cookieValidChar);
+    try cookie.writer.writeAll("user_account=username=");
+    try std.Uri.Component.percentEncode(&cookie.writer, user.username, cookieValidChar);
     try cookie.writer.writeAll("&hmac=");
-    try cookie.writer.printHex(&hmac, .lower);
+    try cookie.writer.printHex(&user.hmac, .lower);
 
     res.status = 302;
     res.headers.add("Location", req.url.path);
@@ -214,20 +269,32 @@ fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {
         if (data.has("form_safe_search")) break :blk postPreferencesSafeSearch(req, res, data);
         break :blk error.InvalidRequest;
     }) catch |err| switch (err) {
-        error.InvalidRequest => try templates.respond(res, (templates.Message{
-            .title = "Preferences: Error",
-            .message = "Invalid request.",
-            .is_error = true,
-        }).interface()),
+        error.InvalidCredentials,
+        error.InvalidRequest,
+        error.MissingUsernameOrPassword,
+        => try errorResponse(res, "Preferences", err),
         else => |leftover_err| return leftover_err,
     };
 }
 
-fn getURL(req: *const httpz.Request, res: *httpz.Response) !void {
+fn getUrl(req: *const httpz.Request, res: *httpz.Response) !void {
     const hash = req.param("hash") orelse return error.InvalidRequest;
-    const url = try urls.getURL(req.arena, hash);
+
+    var url: Url = try .get(req.arena, try utils.hexToBytes(Url.bytes, hash));
+    defer url.deinit(res.arena);
+
+    var domain: Domain = try .get(res.arena, url.domain_hash);
+    defer domain.deinit(res.arena);
+
+    var writer: std.Io.Writer.Allocating = .init(res.arena);
+    defer writer.deinit();
+    try writer.writer.print(
+        "http://{d}.{d}.{d}.{d}:{d}{s}",
+        .{ domain.ip[0], domain.ip[1], domain.ip[2], domain.ip[3], domain.port, url.path },
+    );
+
     res.status = 302;
-    res.headers.add("Location", url);
+    res.headers.add("Location", try writer.toOwnedSlice());
 }
 
 fn getHelp(_: *const httpz.Request, res: *httpz.Response) !void {
@@ -240,6 +307,13 @@ fn getLogoGif(_: *const httpz.Request, res: *httpz.Response) !void {
     res.body = @embedFile("static/logo.gif");
 }
 
+fn makeDir(sub_path: []const u8) !void {
+    std.fs.cwd().makeDir(sub_path) catch |err| switch (err) {
+        std.fs.Dir.MakeError.PathAlreadyExists => {},
+        else => return err,
+    };
+}
+
 pub fn main() !void {
     std.posix.sigaction(std.posix.SIG.INT, &.{
         .handler = .{ .handler = shutdown },
@@ -247,12 +321,18 @@ pub fn main() !void {
         .flags = 0,
     }, null);
 
+    try makeDir("documents");
+    try makeDir("domains");
+    try makeDir("index");
+    try makeDir("urls");
+    try makeDir("users");
+
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     const allocator = gpa.allocator();
 
     var server: httpz.Server(void) = try .init(allocator, .{
         .address = .all(7777),
-        .request = .{ .max_form_count = 5 },
+        .request = .{ .max_form_count = 6 },
     }, {});
     defer {
         server.stop();
@@ -266,7 +346,7 @@ pub fn main() !void {
     router.post("/console", postSearchConsole, .{});
     router.get("/preferences", getPreferences, .{});
     router.post("/preferences", postPreferences, .{});
-    router.get("/u/:hash", getURL, .{});
+    router.get("/u/:hash", getUrl, .{});
     router.get("/help", getHelp, .{});
     router.get("/static/logo.gif", getLogoGif, .{});
 

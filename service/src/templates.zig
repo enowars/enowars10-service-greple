@@ -1,7 +1,10 @@
+const Domain = @import("domain.zig");
 const httpz = @import("httpz");
-const preferences = @import("preferences.zig");
+const SafeSearch = @import("safe_search.zig");
 const search = @import("search.zig");
 const std = @import("std");
+const User = @import("user.zig");
+const utils = @import("utils.zig");
 
 const Escape = struct {
     string: []const u8,
@@ -44,9 +47,9 @@ const Base = struct {
             \\  <style>
             \\    *{{box-sizing:border-box}}
             \\    body{{font-family:Arial,sans-serif}}
-            \\    .form{{display:grid;grid-template-columns:repeat(2,min-content);justify-items:flex-start;gap:.5rem;margin:1rem 0}}
+            \\    .form{{display:grid;grid-template-columns:repeat(2,max-content);justify-items:flex-start;gap:.5rem;margin:1rem 0}}
             \\    .form>[type="submit"]{{grid-column:1/3}}
-            \\    a[name]{{display:block;font-weight:bold;margin-top:2rem}}
+            \\    a[name]{{display:block;font-weight:bold;margin-top:2.5rem}}
             \\    a[name]:first-child{{margin-top:unset}}
             \\  </style>
             \\</head>
@@ -185,7 +188,7 @@ pub const Search = struct {
             \\  </form>
             \\  <div style="padding:2pt;color:white;background:#3366cc;display:flex;justify-content:space-between">
             \\    <small>Searched the web for <b>{f}</b>.</small>
-            \\    <small>Results <b>{d} - {d}</b> of about <b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
+            \\    <small>Results <b>{d} - {d}</b> of {s}<b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
             \\  </div>
             \\</div>
         , .{
@@ -193,6 +196,7 @@ pub const Search = struct {
             Escape{ .string = s.q },
             @min(s.results.results.len, 1),
             s.results.results.len,
+            if (s.results.total > s.results.results.len) " about" else "",
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });
@@ -200,17 +204,23 @@ pub const Search = struct {
 
     fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
-        for (s.results.results) |d| try w.print(
+        for (s.results.results) |r| try w.print(
             \\<p>
-            \\  <a href="{f}">{f}</a>
+            \\  <a href="http://{d}.{d}.{d}.{d}:{d}{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
-            \\  <small><font color="green">{f}</font></small>
+            \\  <small><font color="green">{f}{f}</font></small>
             \\</p>
         , .{
-            Escape{ .string = d.url.? },
-            Escape{ .string = d.title.? },
-            Escape{ .string = d.text },
-            Escape{ .string = d.url.? },
+            r.domain.?.ip[0],
+            r.domain.?.ip[1],
+            r.domain.?.ip[2],
+            r.domain.?.ip[3],
+            r.domain.?.port,
+            Escape{ .string = r.path.? },
+            Escape{ .string = r.title.? },
+            Escape{ .string = r.text },
+            Escape{ .string = r.domain.?.domain },
+            Escape{ .string = r.path.? },
         });
         if (s.results.filtered > 0) try w.print(
             \\<p style="font-size: small">We have removed {d} results from this
@@ -235,7 +245,8 @@ pub const Search = struct {
 };
 
 pub const Preferences = struct {
-    prefs: *const preferences.Preferences,
+    user: ?User,
+    safe_search: SafeSearch,
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Preferences");
@@ -254,8 +265,8 @@ pub const Preferences = struct {
             \\<a name="user_account">User Account</a>
             \\<p>Login into a Greple account to access the search console. If you don't have an account, use the same form to register.</p>
             \\<form method="POST" class="form">
-            \\  <label for="user_account_user">Username:</label>
-            \\  <input id="user_account_user" name="user" size="32" value="{f}">
+            \\  <label for="user_account_username">Username:</label>
+            \\  <input id="user_account_username" name="username" size="32" value="{f}">
             \\  <label for="user_account_password">Password:</label>
             \\  <input id="user_account_password" name="password" size="32" type="password">
             \\  <input type="submit" name="form_user_account" value="Login">
@@ -270,9 +281,9 @@ pub const Preferences = struct {
             \\  <input type="submit" name="form_safe_search" value="Save">
             \\</form>
         , .{
-            Escape{ .string = s.prefs.user_account_user orelse "" },
-            if (s.prefs.safe_search_enabled) " checked" else "",
-            Escape{ .string = s.prefs.safe_search_regex },
+            Escape{ .string = if (s.user) |u| u.username else "" },
+            if (s.safe_search.enabled) " checked" else "",
+            Escape{ .string = s.safe_search.regex },
         });
     }
 
@@ -291,6 +302,8 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
+    domains: []const Domain,
+
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
     }
@@ -304,49 +317,99 @@ pub const SearchConsole = struct {
         );
     }
 
-    fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
-        try w.writeAll(
+    fn formatDomainsTable(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        for (s.domains) |*d| {
+            try w.print(
+                \\<span>{f}</span>
+                \\<span>{d}.{d}.{d}.{d}</span>
+                \\<span>{d}</span>
+            , .{
+                Escape{ .string = d.domain },
+                d.ip[0],
+                d.ip[1],
+                d.ip[2],
+                d.ip[3],
+                d.port,
+            });
+        }
+    }
+
+    fn formatDomainsSelect(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        for (s.domains) |*d| {
+            try w.print(
+                \\<option value="{s}">{f}</option>
+            , .{
+                std.fmt.bytesToHex(d.hash, .lower),
+                Escape{ .string = d.domain },
+            });
+        }
+    }
+
+    fn formatMain(s: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.print(
             \\<a name="domains">Domains</a>
-            \\<p>TODO Your domains</p>
+            \\<p>These domains are registered to your user account.</p>
+            \\<div style="display:grid;grid-template-columns:repeat(3,max-content);row-gap:.25rem;column-gap:.5rem">
+            \\  <u>Domain</u>
+            \\  <u>IP</u>
+            \\  <u>HTTP-Port</u>
+            \\  {f}
+            \\</div>
             \\<a name="register_domain">Register Domain</a>
-            \\<p>TODO Register a domain</p>
+            \\<p>You can register a domain name with an associated IP address and HTTP port number. Registering a domain allows you to submit pages from the domain to the search index. You need to verify the ownership of the IP through a challenge.</p>
             \\<form method="POST" class="form">
             \\  <label for="register_domain_domain">Domain:</label>
             \\  <input id="register_domain_domain" name="domain" size="32">
+            \\  <label for="register_domain_ip">IPv4:</label>
+            \\  <input id="register_domain_ip" name="ip" size="32">
+            \\  <label for="register_domain_port">Port:</label>
+            \\  <input id="register_domain_port" name="port" type="number" value="80">
             \\  <input type="submit" name="form_register_domain" value="Register">
             \\</form>
             \\<a name="submit_page">Submit Page</a>
-            \\<p>Submit a page to be crawled and added to the search index.</p>
+            \\<p>Submit a page to be crawled and added to the search index. If you select public anybody will be able to search for the page, if not only your user account will be able to find the page.</p>
             \\<form method="POST" class="form">
             \\  <label for="submit_page_public">Public:</label>
             \\  <input id="submit_page_public" name="public" type="checkbox" checked>
-            \\  <label for="submit_page_url">URL:</label>
-            \\  <input id="submit_page_url" name="url" size="32">
-            \\  <input type="hidden" name="title" value="Lorem ipsum">
-            \\  <input type="hidden" name="text" value="Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.">
+            \\  <label for="submit_page_domain">Domain:</label>
+            \\  <select id="submit_page_domain" name="domain">{f}</select>
+            \\  <label for="submit_page_path">Path:</label>
+            \\  <input id="submit_page_path" name="path" size="32" value="/">
+            \\  <label for="submit_page_title">Title:</label>
+            \\  <input id="submit_page_title" name="title" size="32">
+            \\  <label for="submit_page_text">Text:</label>
+            \\  <textarea name="text" cols="64" rows="8"></textarea>
             \\  <input type="submit" name="form_submit_page" value="Submit">
             \\</form>
             \\<a name="shorten_url">Shorten URL</a>
-            \\<p>Input an URL to generate an easy to remember short URL.</p>
+            \\<p>Input an path under one of your domains to generate an easy to remember short URL. Be careful anyone with the short URL will be able to access the long URL.</p>
             \\<form method="POST" class="form">
-            \\  <label for="shorten_url_url">URL:</label>
-            \\  <input id="shorten_url_url" name="url" size="32">
+            \\  <label for="shorten_url_domain">Domain:</label>
+            \\  <select id="shorten_url_domain" name="domain">{f}</select>
+            \\  <label for="shorten_url_path">Path:</label>
+            \\  <input id="shorten_url_path" name="path" size="32" value="/">
             \\  <input type="submit" name="form_shorten_url" value="Shorten">
             \\</form>
-        );
+        , .{
+            Template{ .self = s, .formatFn = &formatDomainsTable },
+            Template{ .self = s, .formatFn = &formatDomainsSelect },
+            Template{ .self = s, .formatFn = &formatDomainsSelect },
+        });
     }
 
-    fn format(_: *const anyopaque, w: *std.Io.Writer) !void {
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
         try (Columns{
-            .self = &{},
+            .self = self,
             .formatTitleFn = &formatTitle,
             .formatTOCFn = &formatTOC,
             .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
-    pub fn interface(_: *const @This()) Template {
-        return Template{ .self = &{}, .formatFn = &format };
+    pub fn interface(self: *const @This()) Template {
+        return Template{ .self = self, .formatFn = &format };
     }
 };
 

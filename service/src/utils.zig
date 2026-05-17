@@ -1,6 +1,20 @@
 const std = @import("std");
 
-pub const Hash = std.crypto.hash.sha2.Sha224;
+pub const HashFn = std.crypto.hash.sha2.Sha224;
+pub const Hash = [HashFn.digest_length]u8;
+
+pub fn hash(data: []const u8) Hash {
+    var h: Hash = undefined;
+    HashFn.hash(data, &h, .{});
+    return h;
+}
+
+pub fn hexToBytes(n: comptime_int, data: []const u8) ![n]u8 {
+    if (data.len != n * 2) return error.InvalidLength;
+    var bytes: [n]u8 = undefined;
+    for (0..n) |i| bytes[i] = try std.fmt.parseInt(u8, data[i * 2 .. i * 2 + 2], 16);
+    return bytes;
+}
 
 pub fn cookieValidChar(char: u8) bool {
     return switch (char) {
