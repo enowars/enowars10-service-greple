@@ -30,8 +30,6 @@ _CHECKER = Enochecker("greple", 7777)
 with (pathlib.Path.cwd() / "words.json").open() as f:
     _WORDS: list[str] = json.load(f)
 
-_ENTROPY = 64
-
 _REGEX_ESCAPE = {ord(c): rf"\{c}" for c in r"^$.*?+{|()\["}
 
 _FLAG_URL_IP = "1.1.1.1"
@@ -39,7 +37,7 @@ _FLAG_URL_PORT = 80
 
 _SHORT_URL_PREFIX = "/u/"
 _SHORT_URL_ALPHABET = string.digits + string.ascii_lowercase[: 16 - len(string.digits)]
-_SHORT_URL_LENGTH = math.ceil(_ENTROPY / math.log2(len(_SHORT_URL_ALPHABET)))
+_SHORT_URL_LENGTH = 64 // 4
 _SHORT_URL_REGEX = (
     f"{_SHORT_URL_PREFIX.translate(_REGEX_ESCAPE)}"
     f"[{_SHORT_URL_ALPHABET.translate(_REGEX_ESCAPE)}]"
@@ -52,21 +50,25 @@ def _cookieencode(query: dict[str, str]) -> str:
     return urlencode(query, quote_via=quote)
 
 
-def _noise(alphabet: Sequence[str], sep: str) -> str:
-    n = math.ceil(_ENTROPY / math.log2(len(alphabet)))
+def _noise(alphabet: Sequence[str], sep: str, entropy: int) -> str:
+    n = math.ceil(entropy / math.log2(len(alphabet)))
     return sep.join(random.choice(alphabet) for _ in range(n))
 
 
-def _lower() -> str:
-    return _noise(string.ascii_lowercase, "")
+def _printable_noise(entropy: int) -> str:
+    return _noise(string.printable, "", entropy)
 
 
-def _alnum() -> str:
-    return _noise(string.ascii_letters + string.digits, "")
+def _lower_noise(entropy: int) -> str:
+    return _noise(string.ascii_lowercase, "", entropy)
 
 
-def _words() -> str:
-    return _noise(_WORDS, " ")
+def _alnum_noise(entropy: int) -> str:
+    return _noise(string.ascii_letters + string.digits, "", entropy)
+
+
+def _word_noise(entropy: int) -> str:
+    return _noise(_WORDS, " ", entropy)
 
 
 async def _register_user(client: httpx.AsyncClient, username: str) -> str:
@@ -75,7 +77,11 @@ async def _register_user(client: httpx.AsyncClient, username: str) -> str:
 
     res = await client.post(
         "/preferences",
-        data={"username": username, "password": _alnum(), "form_user_account": "Login"},
+        data={
+            "username": username,
+            "password": _printable_noise(2**7),
+            "form_user_account": "Login",
+        },
     )
     assert_equals(res.status_code, 302, "Unexpected HTTP status")
     if res.next_request is None:
@@ -124,8 +130,8 @@ async def _submit_page(client: httpx.AsyncClient, domain: str, text: str) -> Non
         "/console",
         data={
             "domain": hashlib.sha224(domain.encode()).hexdigest(),
-            "path": f"/{_alnum()}.html",
-            "title": _words(),
+            "path": "/",
+            "title": _word_noise(2**4),
             "text": text,
             "form_submit_page": "Submit",
         },
@@ -180,10 +186,10 @@ async def _get_short_url(client: httpx.AsyncClient, short_url: str) -> str:
 
 @_CHECKER.putflag(0)
 async def _putflag(task: PutflagCheckerTaskMessage, client: httpx.AsyncClient, db: ChainDB) -> str:
-    username = _alnum()
+    username = _alnum_noise(2**7)
     hmac = await _register_user(client, username)
 
-    domain = f"{_lower()}.com"
+    domain = f"{_lower_noise(2**7)}.com"
     await _register_domain(client, domain)
 
     url = await _shorten_url(client, domain, f"/{quote(task.flag)}")
