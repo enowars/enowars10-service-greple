@@ -11,6 +11,11 @@ const Url = @import("url.zig");
 const User = @import("user.zig");
 const utils = @import("utils.zig");
 
+const cookie_opts: httpz.response.CookieOpts = .{
+    .http_only = true,
+    .same_site = .strict,
+};
+
 var server_instance: ?*httpz.Server(void) = null;
 
 fn shutdown(_: i32) callconv(.c) noreturn {
@@ -154,9 +159,11 @@ fn postSearchConsoleSubmitPage(
     }).interface());
 }
 
-// TODO: use set cookie function instead of manual header
-
-fn postSearchConsoleShortenUrl(res: *httpz.Response, data: *const httpz.key_value.StringKeyValue) !void {
+fn postSearchConsoleShortenUrl(
+    req: *const httpz.Request,
+    res: *httpz.Response,
+    data: *const httpz.key_value.StringKeyValue,
+) !void {
     const domain = data.get("domain") orelse return error.InvalidRequest;
     const path = data.get("path") orelse return error.InvalidRequest;
 
@@ -169,6 +176,7 @@ fn postSearchConsoleShortenUrl(res: *httpz.Response, data: *const httpz.key_valu
     var writer: std.Io.Writer.Allocating = .init(res.arena);
     defer writer.deinit();
     // TODO: add http:// host and port
+    _ = req.headers.get("Host");
     try writer.writer.writeAll("/u/");
     try writer.writer.printHex(&url.hash, .lower);
 
@@ -185,7 +193,7 @@ fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
         (blk: {
             if (data.has("form_register_domain")) break :blk postSearchConsoleRegisterDomain(req, res, u, data);
             if (data.has("form_submit_page")) break :blk postSearchConsoleSubmitPage(res, u, data);
-            if (data.has("form_shorten_url")) break :blk postSearchConsoleShortenUrl(res, data);
+            if (data.has("form_shorten_url")) break :blk postSearchConsoleShortenUrl(req, res, data);
             break :blk error.InvalidRequest;
         }) catch |err| switch (err) {
             error.AccessDenied,
@@ -228,15 +236,14 @@ fn postPreferencesUserAccount(
 
     var cookie: std.Io.Writer.Allocating = .init(res.arena);
     defer cookie.deinit();
-
-    try cookie.writer.writeAll("user_account=username=");
+    try cookie.writer.writeAll("username=");
     try std.Uri.Component.percentEncode(&cookie.writer, user.username, cookieValidChar);
     try cookie.writer.writeAll("&hmac=");
     try cookie.writer.printHex(&user.hmac, .lower);
 
     res.status = 302;
     res.headers.add("Location", req.url.path);
-    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+    try res.setCookie("user_account", try cookie.toOwnedSlice(), cookie_opts);
 }
 
 fn postPreferencesSafeSearch(
@@ -249,17 +256,13 @@ fn postPreferencesSafeSearch(
 
     var cookie: std.Io.Writer.Allocating = .init(res.arena);
     defer cookie.deinit();
-
-    try cookie.writer.writeAll("safe_search=");
-
     if (enabled) try cookie.writer.writeAll("enabled=on&");
-
     try cookie.writer.writeAll("regex=");
     try std.Uri.Component.percentEncode(&cookie.writer, regex, cookieValidChar);
 
     res.status = 302;
     res.headers.add("Location", req.url.path);
-    res.headers.add("Set-Cookie", try cookie.toOwnedSlice());
+    try res.setCookie("safe_search", try cookie.toOwnedSlice(), cookie_opts);
 }
 
 fn postPreferences(req: *httpz.Request, res: *httpz.Response) !void {

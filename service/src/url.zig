@@ -13,8 +13,7 @@ fn openDir() !std.fs.Dir {
 }
 
 pub fn init(domain: *const Domain, path: []const u8) !@This() {
-    // TODO: take full url into account
-    if (domain.domain.len + 1 + path.len <= bytes * 2) return error.UrlAlreadyShort;
+    if (path.len <= "/u/".len + bytes * 2) return error.UrlAlreadyShort;
     return .{
         .hash = utils.hash(path)[0 .. bytes].*,
         .domain_hash = domain.hash,
