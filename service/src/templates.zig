@@ -39,7 +39,7 @@ const Base = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<!DOCTYPE html>
-            \\<html land="en">
+            \\<html lang="en">
             \\<head>
             \\  <meta charset="UTF-8">
             \\  <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -138,15 +138,15 @@ const Columns = struct {
             \\  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
             \\  {f}
             \\  <div style="font-size:small;align-self:start;margin-top:1rem;margin-left:.5rem">
-            \\    <div style="display:flex;flex-direction:column;gap:.5rem">
+            \\    <nav style="display:flex;flex-direction:column;gap:.5rem;align-items:start">
             \\      <a href="/">Home</a>
             \\      <a href="/console">Search Console</a>
             \\      <a href="/preferences">Preferences</a>
             \\      <a href="/help">Search Tips</a>
-            \\    </div>
+            \\    </nav>
             \\    {f}
             \\  </div>
-            \\  <div style="align-self:start">{f}</div>
+            \\  <main style="align-self:start">{f}</main>
             \\</div>
         , .{
             Template{ .self = self, .formatFn = formatHeader },
@@ -380,7 +380,7 @@ pub const SearchConsole = struct {
             \\  <label for="submit_page_title">Title:</label>
             \\  <input id="submit_page_title" name="title" size="32">
             \\  <label for="submit_page_text">Text:</label>
-            \\  <textarea name="text" cols="64" rows="8"></textarea>
+            \\  <textarea id="submit_page_text" name="text" cols="64" rows="8"></textarea>
             \\  <input type="submit" name="form_submit_page" value="Submit">
             \\</form>
             \\<a name="shorten_url">Shorten URL</a>
