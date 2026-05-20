@@ -8,17 +8,17 @@ const re = mvzr.compile("([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9][a-z0-9
 hash: utils.Hash,
 user_hash: utils.Hash,
 domain: []const u8,
-ip: [4]u8,
+ipv4: [4]u8,
 port: u16,
 
 fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
     return std.fs.cwd().openDir("domains", args);
 }
 
-pub fn init(user: *const User, domain: []const u8, ip: []const u8, port: []const u8) !@This() {
+pub fn init(user: *const User, domain: []const u8, ipv4: []const u8, port: []const u8) !@This() {
     if (!re.isMatch(domain)) return error.InvalidDomain;
 
-    const addr = std.net.Ip4Address.parse(ip, 1) catch return error.InvalidIp;
+    const addr = std.net.Ip4Address.parse(ipv4, 1) catch return error.InvalidIpv4;
 
     const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
     if (p != 80) return error.InvalidPort; // TODO: extend port whitelist
@@ -27,7 +27,7 @@ pub fn init(user: *const User, domain: []const u8, ip: []const u8, port: []const
         .hash = utils.hash(domain),
         .user_hash = user.hash,
         .domain = domain,
-        .ip = std.mem.asBytes(&addr.sa.addr).*,
+        .ipv4 = std.mem.asBytes(&addr.sa.addr).*,
         .port = p,
     };
 }
@@ -46,7 +46,7 @@ pub fn put(self: *const @This()) !void {
     try writer.interface.writeAll(&self.user_hash);
     try writer.interface.writeInt(u16, @truncate(self.domain.len), .little);
     try writer.interface.writeAll(self.domain);
-    try writer.interface.writeAll(&self.ip);
+    try writer.interface.writeAll(&self.ipv4);
     try writer.interface.writeInt(u16, self.port, .little);
 }
 
@@ -61,7 +61,7 @@ fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, hash: utils.Hash) !@Thi
         .hash = hash,
         .user_hash = (try reader.interface.takeArray(@sizeOf(utils.Hash))).*,
         .domain = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
-        .ip = (try reader.interface.takeArray(4)).*,
+        .ipv4 = (try reader.interface.takeArray(4)).*,
         .port = try reader.interface.takeInt(u16, .little),
     };
 }

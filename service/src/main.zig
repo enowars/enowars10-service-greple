@@ -71,10 +71,10 @@ fn getSearch(req: *httpz.Request, res: *httpz.Response) !void {
         try writer.writer.print(
             "http://{d}.{d}.{d}.{d}:{d}{s}",
             .{
-                results.results[0].domain.?.ip[0],
-                results.results[0].domain.?.ip[1],
-                results.results[0].domain.?.ip[2],
-                results.results[0].domain.?.ip[3],
+                results.results[0].domain.?.ipv4[0],
+                results.results[0].domain.?.ipv4[1],
+                results.results[0].domain.?.ipv4[2],
+                results.results[0].domain.?.ipv4[3],
                 results.results[0].domain.?.port,
                 results.results[0].path.?,
             },
@@ -109,10 +109,10 @@ fn postSearchConsoleRegisterDomain(
     data: *const httpz.key_value.StringKeyValue,
 ) !void {
     const domain = data.get("domain") orelse return error.InvalidRequest;
-    const ip = data.get("ip") orelse return error.InvalidRequest;
+    const ipv4 = data.get("ipv4") orelse return error.InvalidRequest;
     const port = data.get("port") orelse return error.InvalidRequest;
 
-    const d: Domain = try .init(user, domain, ip, port);
+    const d: Domain = try .init(user, domain, ipv4, port);
     try d.put();
 
     res.status = 302;
@@ -198,7 +198,7 @@ fn postSearchConsole(req: *httpz.Request, res: *httpz.Response) !void {
         }) catch |err| switch (err) {
             error.AccessDenied,
             error.InvalidDomain,
-            error.InvalidIp,
+            error.InvalidIpv4,
             error.InvalidPort,
             error.InvalidRequest,
             error.UrlAlreadyShort,
@@ -293,7 +293,7 @@ fn getUrl(req: *const httpz.Request, res: *httpz.Response) !void {
     defer writer.deinit();
     try writer.writer.print(
         "http://{d}.{d}.{d}.{d}:{d}{s}",
-        .{ domain.ip[0], domain.ip[1], domain.ip[2], domain.ip[3], domain.port, url.path },
+        .{ domain.ipv4[0], domain.ipv4[1], domain.ipv4[2], domain.ipv4[3], domain.port, url.path },
     );
 
     res.status = 302;

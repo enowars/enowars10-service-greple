@@ -211,10 +211,10 @@ pub const Search = struct {
             \\  <small><font color="green">{f}{f}</font></small>
             \\</p>
         , .{
-            r.domain.?.ip[0],
-            r.domain.?.ip[1],
-            r.domain.?.ip[2],
-            r.domain.?.ip[3],
+            r.domain.?.ipv4[0],
+            r.domain.?.ipv4[1],
+            r.domain.?.ipv4[2],
+            r.domain.?.ipv4[3],
             r.domain.?.port,
             Escape{ .string = r.path.? },
             Escape{ .string = r.title.? },
@@ -326,10 +326,10 @@ pub const SearchConsole = struct {
                 \\<span>{d}</span>
             , .{
                 Escape{ .string = d.domain },
-                d.ip[0],
-                d.ip[1],
-                d.ip[2],
-                d.ip[3],
+                d.ipv4[0],
+                d.ipv4[1],
+                d.ipv4[2],
+                d.ipv4[3],
                 d.port,
             });
         }
@@ -353,17 +353,17 @@ pub const SearchConsole = struct {
             \\<p>These domains are registered to your user account.</p>
             \\<div style="display:grid;grid-template-columns:repeat(3,max-content);row-gap:.25rem;column-gap:.5rem">
             \\  <u>Domain</u>
-            \\  <u>IP</u>
+            \\  <u>IPv4</u>
             \\  <u>HTTP-Port</u>
             \\  {f}
             \\</div>
             \\<a name="register_domain">Register Domain</a>
-            \\<p>You can register a domain name with an associated IP address and HTTP port number. Registering a domain allows you to submit pages from the domain to the search index. You need to verify the ownership of the IP through a challenge.</p>
+            \\<p>You can register a domain name with an associated IPv4 address and HTTP port number. Registering a domain allows you to submit pages from the domain to the search index. You need to verify the ownership of the IPv4 through a challenge.</p>
             \\<form method="POST" class="form">
             \\  <label for="register_domain_domain">Domain:</label>
             \\  <input id="register_domain_domain" name="domain" size="32">
-            \\  <label for="register_domain_ip">IPv4:</label>
-            \\  <input id="register_domain_ip" name="ip" size="32">
+            \\  <label for="register_domain_ipv4">IPv4:</label>
+            \\  <input id="register_domain_ipv4" name="ipv4" size="32">
             \\  <label for="register_domain_port">Port:</label>
             \\  <input id="register_domain_port" name="port" type="number" value="80">
             \\  <input type="submit" name="form_register_domain" value="Register">
