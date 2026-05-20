@@ -118,7 +118,7 @@ fn getTop10Results(
             e.value_ptr.domain = domain;
         }
 
-        if (if (user) |u| !std.mem.eql(u8, &e.value_ptr.domain.?.user_hash, &u.hash) else true and !entry.public) {
+        if ((if (user) |u| !std.mem.eql(u8, &e.value_ptr.domain.?.user_hash, &u.hash) else true) and !entry.public) {
             if (domain) |*d| d.deinit(alloc);
             entry.deinit(alloc);
             continue;
