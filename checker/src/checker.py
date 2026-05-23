@@ -32,7 +32,7 @@ with (pathlib.Path.cwd() / "words.json").open() as f:
 
 _REGEX_ESCAPE = {ord(c): rf"\{c}" for c in r"^$.*?+{|()\["}
 
-_FLAG_URL_IP = "1.1.1.1"
+_FLAG_URL_IPV4 = "1.1.1.1"
 _FLAG_URL_PORT = 80
 
 _SHORT_URL_PREFIX = "/u/"
@@ -108,7 +108,7 @@ async def _register_domain(client: httpx.AsyncClient, domain: str) -> None:
         "/console",
         data={
             "domain": domain,
-            "ip": _FLAG_URL_IP,
+            "ipv4": _FLAG_URL_IPV4,
             "port": _FLAG_URL_PORT,
             "form_register_domain": "Register",
         },
@@ -294,7 +294,7 @@ async def _exploit_sca(
     short_url = _SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await _get_short_url(client, short_url)
-    return unquote(url.removeprefix(f"http://{_FLAG_URL_IP}:{_FLAG_URL_PORT}/"))
+    return unquote(url.removeprefix(f"http://{_FLAG_URL_IPV4}:{_FLAG_URL_PORT}/"))
 
 
 def app() -> fastapi.FastAPI:
