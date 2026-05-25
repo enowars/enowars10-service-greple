@@ -188,7 +188,7 @@ pub const Search = struct {
             \\  </form>
             \\  <div style="padding:2pt;color:white;background:#3366cc;display:flex;justify-content:space-between">
             \\    <small>Searched the web for <b>{f}</b>.</small>
-            \\    <small>Results <b>{d} - {d}</b> of {s}<b>{d}</b>. Search took <b>{d:.2}</b> seconds.</small>
+            \\    <small>Results <b>{d} - {d}</b> of {s}<b>{d}</b>. Search took <b>{d:.3}</b> seconds.</small>
             \\  </div>
             \\</div>
         , .{

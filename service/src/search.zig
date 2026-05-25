@@ -80,7 +80,8 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
     return results;
 }
 
-const Regex = mvzr.SizedRegex(1 << 10, 1 << 3);
+// TODO: add test in checker to ensure allowed complexity isn't reduced
+const Regex = mvzr.SizedRegex(42, 2);
 
 fn getTop10Results(
     alloc: std.mem.Allocator,
