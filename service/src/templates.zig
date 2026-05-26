@@ -4,7 +4,6 @@ const SafeSearch = @import("safe_search.zig");
 const search = @import("search.zig");
 const std = @import("std");
 const User = @import("user.zig");
-const utils = @import("utils.zig");
 
 const Escape = struct {
     string: []const u8,
@@ -62,7 +61,7 @@ const Base = struct {
     }
 
     fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -99,7 +98,7 @@ pub const Index = struct {
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -107,7 +106,7 @@ const Columns = struct {
     self: *const anyopaque,
     formatTitleFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
     formatHeaderFn: ?*const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void = null,
-    formatTOCFn: ?*const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void = null,
+    formatTocFn: ?*const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void = null,
     formatMainFn: *const fn (self: *const anyopaque, w: *std.Io.Writer) std.Io.Writer.Error!void,
 
     fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
@@ -123,9 +122,9 @@ const Columns = struct {
         , .{Template{ .self = s.self, .formatFn = s.formatTitleFn }});
     }
 
-    fn formatTOC(self: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatToc(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
-        if (s.formatTOCFn) |f| try w.print(
+        if (s.formatTocFn) |f| try w.print(
             \\<p><b>Table of Contents</b></p>
             \\<ul style="display:flex;flex-direction:column;gap:.5rem;padding-left:1.5rem">{f}</ul>
         , .{Template{ .self = s.self, .formatFn = f }});
@@ -150,7 +149,7 @@ const Columns = struct {
             \\</div>
         , .{
             Template{ .self = self, .formatFn = formatHeader },
-            Template{ .self = self, .formatFn = formatTOC },
+            Template{ .self = self, .formatFn = formatToc },
             Template{ .self = s.self, .formatFn = s.formatMainFn },
         });
     }
@@ -164,7 +163,7 @@ const Columns = struct {
     }
 
     fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -240,7 +239,7 @@ pub const Search = struct {
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -252,7 +251,7 @@ pub const Preferences = struct {
         try w.writeAll("Preferences");
     }
 
-    fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
             \\<li><a href="#user_account">User Account</a></li>
             \\<li><a href="#safe_search">Safe Search</a></li>
@@ -291,13 +290,13 @@ pub const Preferences = struct {
         try (Columns{
             .self = self,
             .formatTitleFn = &formatTitle,
-            .formatTOCFn = &formatTOC,
+            .formatTocFn = &formatToc,
             .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -308,7 +307,7 @@ pub const SearchConsole = struct {
         try w.writeAll("Search Console");
     }
 
-    fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
             \\<li><a href="#domains">Domains</a></li>
             \\<li><a href="#register_domain">Register Domain</a></li>
@@ -403,13 +402,13 @@ pub const SearchConsole = struct {
         try (Columns{
             .self = self,
             .formatTitleFn = &formatTitle,
-            .formatTOCFn = &formatTOC,
+            .formatTocFn = &formatToc,
             .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -418,7 +417,7 @@ pub const SearchTips = struct {
         try w.writeAll("Search Tips");
     }
 
-    fn formatTOC(_: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
             \\<li><a href="#basic">Basic Search</a></li>
             \\<li><a href="#and">Automatic "and" Queries</a></li>
@@ -437,13 +436,13 @@ pub const SearchTips = struct {
         try (Columns{
             .self = self,
             .formatTitleFn = &formatTitle,
-            .formatTOCFn = &formatTOC,
+            .formatTocFn = &formatToc,
             .formatMainFn = &formatMain,
         }).interface().format(w);
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
@@ -476,12 +475,11 @@ pub const Message = struct {
     }
 
     pub fn interface(self: *const @This()) Template {
-        return Template{ .self = self, .formatFn = &format };
+        return .{ .self = self, .formatFn = &format };
     }
 };
 
 pub fn respond(res: *httpz.Response, template: Template) !void {
-    res.status = 200;
     res.content_type = .HTML;
     try template.format(res.writer());
 }

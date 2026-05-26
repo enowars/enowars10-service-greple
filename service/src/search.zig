@@ -36,7 +36,7 @@ const Result = struct {
     text: []const u8,
     score: f32,
 
-    fn add_match(self: *@This(), text: []const u8) void {
+    fn addMatch(self: *@This(), text: []const u8) void {
         if (self.text.len < text.len) self.text = text;
         self.score += std.math.pow(f32, @floatFromInt(text.len), 1 / 3);
     }
@@ -66,7 +66,7 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
 
         const result = try results.getOrPut(key);
         if (result.found_existing) {
-            result.value_ptr.add_match(text);
+            result.value_ptr.addMatch(text);
         } else {
             result.key_ptr.* = key;
             result.value_ptr.domain = query.domain;

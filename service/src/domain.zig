@@ -89,7 +89,7 @@ pub fn getAllOwned(alloc: std.mem.Allocator, user: *const User) ![]const @This()
         try domains.append(alloc, domain);
     }
 
-    return try domains.toOwnedSlice(alloc);
+    return domains.toOwnedSlice(alloc);
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
