@@ -123,13 +123,14 @@ async def _register_domain(client: httpx.AsyncClient, domain: str) -> None:
     assert_in(escape(domain), res.text, "Unexpected table value")
 
 
-async def _submit_page(client: httpx.AsyncClient, domain: str, text: str) -> None:
+async def _submit_page(client: httpx.AsyncClient, public: bool, domain: str, text: str) -> None:
     res = await client.get("/console")
     assert_equals(res.status_code, 200, "Unexpected HTTP status")
 
     res = await client.post(
         "/console",
         data={
+            **({"public": "on"} if public else {}),
             "domain": hashlib.sha224(domain.encode()).hexdigest(),
             "path": "/",
             "title": _word_noise(2**4),
@@ -195,7 +196,7 @@ async def _putflag(task: PutflagCheckerTaskMessage, client: httpx.AsyncClient, d
 
     url = await _shorten_url(client, domain, f"/{quote(task.flag)}")
 
-    await _submit_page(client, domain, url)
+    await _submit_page(client, False, domain, url)
 
     await db.set("username", username)
     await db.set("hmac", hmac)
@@ -222,6 +223,32 @@ async def _getflag(task: GetflagCheckerTaskMessage, client: httpx.AsyncClient, d
 
     url = await _get_short_url(client, short_url[0])
     assert_in(quote(task.flag), url, "Flag missing")
+
+
+@_CHECKER.putnoise(0)
+async def _put_public_document(client: httpx.AsyncClient, db: ChainDB) -> None:
+    await _register_user(client, _alnum_noise(2**7))
+
+    domain = f"{_lower_noise(2**7)}.com"
+    await _register_domain(client, domain)
+
+    words = _word_noise(2**7)
+    await _submit_page(client, True, domain, words)
+
+    await db.set("domain", domain)
+    await db.set("words", words)
+
+
+@_CHECKER.getnoise(0)
+async def _get_public_document(client: httpx.AsyncClient, db: ChainDB) -> None:
+    try:
+        domain = await db.get("domain")
+        words = await db.get("words")
+    except KeyError as e:
+        raise MumbleException("Missing putnoise data in DB") from e
+
+    res = await _search(client, words)
+    assert_in(domain, res.text, "Public document not returned as result")
 
 
 async def _time_redos(client: httpx.AsyncClient, sem: asyncio.Semaphore, n: int, domain: str, regex: str) -> float:
@@ -274,7 +301,7 @@ async def _calibrate_redos(
     domain = f"{_lower_noise(2**7)}.com"
     await _register_domain(client, domain)
 
-    await _submit_page(client, domain, f"{_SHORT_URL_PREFIX}abc")
+    await _submit_page(client, False, domain, f"{_SHORT_URL_PREFIX}abc")
 
     for n in range(5, 20):
         match_time = await _sample_redos_time(client, sem, n, domain, "abc")

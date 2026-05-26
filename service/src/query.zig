@@ -20,7 +20,7 @@ const site_seperators = struct {
 }.f(0);
 
 const re_prefix = "\\(^\\|[^a-zA-Z0-9]\\)";
-const re_sep = "[a-zA-Z0-9]\\+";
+const re_sep = "[^a-zA-Z0-9]\\+";
 const re_suffix = "\\([^a-zA-Z0-9]\\|$\\)";
 
 pattern: []const u8,
