@@ -195,7 +195,7 @@ pub const Search = struct {
             Escape{ .string = s.q },
             @min(s.results.results.len, 1),
             s.results.results.len,
-            if (s.results.total > s.results.results.len) " about" else "",
+            if (s.results.total > s.results.results.len) "about " else "",
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });

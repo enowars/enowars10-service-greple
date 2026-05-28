@@ -311,6 +311,7 @@ fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
 
 fn getLogoGif(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
     res.content_type = .GIF;
+    res.headers.add("Cache-Control", "max-age=" ++ std.fmt.comptimePrint("{d}", .{60 * 60 * 24}));
     res.body = @embedFile("static/logo.gif");
 }
 
