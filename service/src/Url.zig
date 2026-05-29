@@ -15,7 +15,7 @@ fn openDir() !std.fs.Dir {
 pub fn init(domain: *const Domain, path: []const u8) !@This() {
     if (path.len <= "/u/".len + bytes * 2) return error.UrlAlreadyShort;
     return .{
-        .hash = utils.hash(path)[0 .. bytes].*,
+        .hash = utils.hash(path)[0..bytes].*,
         .domain_hash = domain.hash,
         .path = path,
     };
@@ -27,7 +27,10 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir();
     defer dir.close();
 
-    var file = try dir.createFile(&std.fmt.bytesToHex(self.hash, .lower), .{ .exclusive = true });
+    var file = dir.createFile(&std.fmt.bytesToHex(self.hash, .lower), .{ .exclusive = true }) catch |err| switch (err) {
+        std.fs.File.OpenError.PathAlreadyExists => return,
+        else => |leftover_err| return leftover_err,
+    };
     defer file.close();
 
     var writer = file.writer(&.{});

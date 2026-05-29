@@ -40,18 +40,24 @@ fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
 
 pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
     const safe_err = switch (err) {
+        error.DomainTooLong,
         error.InvalidDomain,
         error.InvalidIpv4,
         error.InvalidPath,
         error.InvalidPort,
         error.InvalidRequest,
         error.MissingUsernameOrPassword,
+        error.PathTooLong,
+        error.TextTooLong,
+        error.TitleTooLong,
         error.UrlAlreadyShort,
         => |bad_request_err| blk: {
             res.status = 400;
             break :blk bad_request_err;
         },
-        error.AccessDenied => |forbidden_err| blk: {
+        error.AccessDenied,
+        error.InvalidCredentials,
+        => |forbidden_err| blk: {
             res.status = 403;
             break :blk forbidden_err;
         },
@@ -187,8 +193,8 @@ fn postSearchConsoleShortenUrl(
 
     var writer: std.Io.Writer.Allocating = .init(res.arena);
     defer writer.deinit();
-    // TODO: add http:// host and port
-    _ = req.headers.get("Host");
+    try writer.writer.writeAll("http://");
+    try writer.writer.writeAll(req.header("host") orelse "127.0.0.1:7777");
     try writer.writer.writeAll("/u/");
     try writer.writer.printHex(&url.hash, .lower);
 
