@@ -1,14 +1,14 @@
-const Document = @import("document.zig");
-const Domain = @import("domain.zig");
+const Document = @import("Document.zig");
+const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
-const IndexEntry = @import("index_entry.zig");
-const Query = @import("query.zig");
-const SafeSearch = @import("safe_search.zig");
+const IndexEntry = @import("IndexEntry.zig");
+const Query = @import("Query.zig");
+const SafeSearch = @import("SafeSearch.zig");
 const search = @import("search.zig");
 const std = @import("std");
 const templates = @import("templates.zig");
-const Url = @import("url.zig");
-const User = @import("user.zig");
+const Url = @import("Url.zig");
+const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 const cookie_opts: httpz.response.CookieOpts = .{

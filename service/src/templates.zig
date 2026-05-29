@@ -1,9 +1,9 @@
-const Domain = @import("domain.zig");
+const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
-const SafeSearch = @import("safe_search.zig");
+const SafeSearch = @import("SafeSearch.zig");
 const search = @import("search.zig");
 const std = @import("std");
-const User = @import("user.zig");
+const User = @import("User.zig");
 
 const Escape = struct {
     string: []const u8,

@@ -1,6 +1,6 @@
 const mvzr = @import("mvzr");
 const std = @import("std");
-const User = @import("user.zig");
+const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 const re = mvzr.compile("([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]").?;

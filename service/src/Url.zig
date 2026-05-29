@@ -1,4 +1,4 @@
-const Domain = @import("domain.zig");
+const Domain = @import("Domain.zig");
 const std = @import("std");
 const utils = @import("utils.zig");
 

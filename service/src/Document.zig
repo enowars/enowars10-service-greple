@@ -1,4 +1,4 @@
-const IndexEntry = @import("index_entry.zig");
+const IndexEntry = @import("IndexEntry.zig");
 const std = @import("std");
 
 text: []const []const u8,

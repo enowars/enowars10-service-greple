@@ -1,11 +1,11 @@
-const Document = @import("document.zig");
-const Domain = @import("domain.zig");
-const IndexEntry = @import("index_entry.zig");
+const Document = @import("Document.zig");
+const Domain = @import("Domain.zig");
+const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
-const Query = @import("query.zig");
-const SafeSearch = @import("safe_search.zig");
+const Query = @import("Query.zig");
+const SafeSearch = @import("SafeSearch.zig");
 const std = @import("std");
-const User = @import("user.zig");
+const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
