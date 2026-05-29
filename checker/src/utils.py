@@ -45,8 +45,7 @@ def assert_status(res: httpx.Response, status_code: int) -> None:
     assert_equals(res.status_code, status_code, "Unexpected HTTP status code")
 
 
-async def register_user(client: Client, username: str) -> None:
-    """Register a user with username."""
+async def _get_preferences(client: Client) -> None:
     if (
         client.last_request is None
         or client.last_request.method != "GET"
@@ -54,6 +53,11 @@ async def register_user(client: Client, username: str) -> None:
     ):
         res = await client.get("/preferences")
         assert_status(res, 200)
+
+
+async def register_user(client: Client, username: str) -> None:
+    """Register a user with username."""
+    await _get_preferences(client)
 
     res = await client.post(
         "/preferences",
@@ -82,13 +86,7 @@ async def register_user(client: Client, username: str) -> None:
 
 async def set_safe_search(client: Client, enabled: bool, regex: str) -> None:
     """Set safe search preferences."""
-    if (
-        client.last_request is None
-        or client.last_request.method != "GET"
-        or client.last_request.url.raw_path != b"/preferences"
-    ):
-        res = await client.get("/preferences")
-        assert_status(res, 200)
+    await _get_preferences(client)
 
     res = await client.post(
         "/preferences",
@@ -134,8 +132,8 @@ async def register_domain(client: Client, domain: str) -> None:
         "/console",
         data={
             "domain": domain,
-            "ipv4": FLAG_URL_IPV4,
-            "port": FLAG_URL_PORT,
+            "ipv4": "127.0.0.1",
+            "port": 7777,
             "form_register_domain": "Register",
         },
     )
@@ -148,7 +146,7 @@ async def register_domain(client: Client, domain: str) -> None:
     assert_in(escape(domain), res.text, "Missing registered domain")
 
 
-async def submit_page(client: Client, public: bool, domain: str, path: str, text: str) -> None:
+async def submit_page(client: Client, public: bool, domain: str, path: str) -> None:
     """Submit a page."""
     await _get_console(client)
 
@@ -158,8 +156,6 @@ async def submit_page(client: Client, public: bool, domain: str, path: str, text
             **({"public": "on"} if public else {}),
             "domain": hashlib.sha224(domain.encode()).hexdigest(),
             "path": path,
-            "title": word_noise(2**4),
-            "text": text,
             "form_submit_page": "Submit",
         },
     )
@@ -185,6 +181,28 @@ async def shorten_url(client: Client, domain: str, path: str) -> str:
         raise MumbleException(f"Failed to find short URL")
 
     return short_url[0]
+
+
+async def paste(client: Client, text: str) -> httpx.URL:
+    """Submit text to pastebin returning paste url."""
+    if (
+        client.last_request is None
+        or client.last_request.method != "GET"
+        or client.last_request.url.raw_path != b"/pastebin"
+    ):
+        res = await client.get("/pastebin")
+        assert_status(res, 200)
+
+    res = await client.post("/pastebin", data={"title": word_noise(2**7), "text": text})
+    assert_status(res, 302)
+    if res.next_request is None:
+        raise MumbleException("No redirect location")
+
+    res = await client.send(res.next_request)
+    assert_status(res, 200)
+    assert_in(escape(text), res.text, "Missing text in pastebin result")
+
+    return res.request.url
 
 
 async def search(client: Client, q: str) -> str:

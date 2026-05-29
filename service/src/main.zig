@@ -1,3 +1,4 @@
+const crawl = @import("crawl.zig");
 const Document = @import("Document.zig");
 const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
@@ -41,6 +42,7 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
     const safe_err = switch (err) {
         error.InvalidDomain,
         error.InvalidIpv4,
+        error.InvalidPath,
         error.InvalidPort,
         error.InvalidRequest,
         error.MissingUsernameOrPassword,
@@ -52,6 +54,10 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
         error.AccessDenied => |forbidden_err| blk: {
             res.status = 403;
             break :blk forbidden_err;
+        },
+        error.IndexingFailed => |internal_err| blk: {
+            res.status = 500;
+            break :blk internal_err;
         },
         else => |leftover_err| blk: {
             std.log.info("500 {} {s} {}", .{ req.method, req.url.path, leftover_err });
@@ -95,17 +101,10 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     if (query_params.has("btnI") and results.results.len > 0) {
         var writer: std.Io.Writer.Allocating = .init(res.arena);
         defer writer.deinit();
-        try writer.writer.print(
-            "http://{d}.{d}.{d}.{d}:{d}{s}",
-            .{
-                results.results[0].domain.?.ipv4[0],
-                results.results[0].domain.?.ipv4[1],
-                results.results[0].domain.?.ipv4[2],
-                results.results[0].domain.?.ipv4[3],
-                results.results[0].domain.?.port,
-                results.results[0].path.?,
-            },
-        );
+        try writer.writer.print("http://{f}{s}", .{
+            results.results[0].domain.?,
+            results.results[0].path.?,
+        });
 
         res.status = 302;
         res.headers.add("Location", try writer.toOwnedSlice());
@@ -152,34 +151,22 @@ fn postSearchConsoleSubmitPage(
     const public = data.has("public");
     const domain = data.get("domain") orelse return error.InvalidRequest;
     const path = data.get("path") orelse return error.InvalidRequest;
-    const title = data.get("title") orelse return error.InvalidRequest;
-    const text = data.get("text") orelse return error.InvalidRequest;
 
-    const d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
-    if (!std.mem.eql(u8, &d.user_hash, &user.hash)) return error.AccessDenied;
+    var d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
+    defer d.deinit(res.arena);
+    if (!std.mem.eql(u8, &d.user_hash, &user.hash)) return error.InvalidRequest;
 
-    const index_entry: IndexEntry = .{
-        .public = public,
-        .domain_hash = d.hash,
-        .path_hash = utils.hash(path),
-        .path = path, // TODO: verify valid path
-        .title = title, // TODO: get from web
-    };
-    try index_entry.put(res.arena);
-
-    // TODO: get from web
-    var t: std.ArrayList([]const u8) = .empty;
-    defer t.deinit(res.arena);
-    var it = std.mem.splitAny(u8, text, "\r\n");
-    while (it.next()) |l| {
-        if (l.len == 0) continue;
-        try t.append(res.arena, l);
+    var index_entry, var document = try crawl.crawl(res.arena, public, &d, path);
+    defer {
+        index_entry.deinit(res.arena);
+        document.deinit(res.arena);
     }
-    try (Document{ .text = try t.toOwnedSlice(res.arena) }).put(&index_entry);
+    try index_entry.put(res.arena);
+    try document.put(&index_entry);
 
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Submitted Page",
-        .message = "The page has been submitted for indexing.",
+        .message = "The page has been submitted to the index.",
         .is_error = false,
     }).interface());
 }
@@ -321,10 +308,7 @@ fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
 
     var writer: std.Io.Writer.Allocating = .init(res.arena);
     defer writer.deinit();
-    try writer.writer.print(
-        "http://{d}.{d}.{d}.{d}:{d}{s}",
-        .{ domain.ipv4[0], domain.ipv4[1], domain.ipv4[2], domain.ipv4[3], domain.port, url.path },
-    );
+    try writer.writer.print("http://{f}{s}", .{ domain, url.path });
 
     res.status = 302;
     res.headers.add("Location", try writer.toOwnedSlice());
@@ -396,4 +380,8 @@ pub fn main() !void {
 
     server_instance = &server;
     try server.listen();
+}
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
 }

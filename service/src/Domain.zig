@@ -16,12 +16,17 @@ fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
 }
 
 pub fn init(user: *const User, domain: []const u8, ipv4: []const u8, port: []const u8) !@This() {
-    if (!re.isMatch(domain)) return error.InvalidDomain;
+    if (!utils.fullMatch(&re, domain)) return error.InvalidDomain;
 
     const addr = std.net.Ip4Address.parse(ipv4, 1) catch return error.InvalidIpv4;
-
     const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
-    if (p != 80) return error.InvalidPort; // TODO: extend port whitelist
+
+    switch (addr.sa.addr) {
+        std.net.Ip4Address.init(.{ 127, 0, 0, 1 }, 1).sa.addr => {
+            if (p != 7777) return error.InvalidPort;
+        },
+        else => return error.InvalidIpv4,
+    }
 
     return .{
         .hash = utils.hash(domain),
@@ -30,6 +35,15 @@ pub fn init(user: *const User, domain: []const u8, ipv4: []const u8, port: []con
         .ipv4 = std.mem.asBytes(&addr.sa.addr).*,
         .port = p,
     };
+}
+
+pub fn formatIpv4(self: *const @This(), writer: *std.Io.Writer) !void {
+    try writer.print("{d}.{d}.{d}.{d}", .{ self.ipv4[0], self.ipv4[1], self.ipv4[2], self.ipv4[3] });
+}
+
+pub fn format(self: *const @This(), writer: *std.Io.Writer) !void {
+    try formatIpv4(self, writer);
+    try writer.print(":{d}", .{self.port});
 }
 
 pub fn put(self: *const @This()) !void {
@@ -97,7 +111,7 @@ pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
     self.* = undefined;
 }
 
-test "domain name regex" {
-    std.testing.expect(re.isMatch("abc.com"));
-    std.testing.expect(!re.isMatch(" abc.com"));
+test "domain validation" {
+    try std.testing.expect(utils.fullMatch(&re, "abc.com"));
+    try std.testing.expect(utils.fullMatch(&re, "xyz.abc.com"));
 }

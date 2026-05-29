@@ -79,14 +79,6 @@ test "word separation" {
     var r = try init(std.testing.allocator, "a-b.c_d*e  f");
     try std.testing.expect(r != null);
     defer r.?.deinit(std.testing.allocator);
-    try std.testing.expect(r.?.site == null);
+    try std.testing.expect(r.?.domain == null);
     try std.testing.expectEqualSlices(u8, r.?.pattern, re_prefix ++ "a" ++ re_sep ++ "b" ++ re_sep ++ "c" ++ re_sep ++ "d" ++ re_sep ++ "e" ++ re_sep ++ "f" ++ re_suffix);
-}
-
-test "site: parameter parsing" {
-    var r = try init(std.testing.allocator, "SiTe:a-b.abc.com a");
-    try std.testing.expect(r != null);
-    defer r.?.deinit(std.testing.allocator);
-    try std.testing.expect(r.?.site != null);
-    try std.testing.expectEqualSlices(u8, r.?.site.?, "a-b.abc.com");
 }

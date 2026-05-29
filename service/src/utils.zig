@@ -1,3 +1,4 @@
+const mvzr = @import("mvzr");
 const std = @import("std");
 
 pub const HashFn = std.crypto.hash.sha2.Sha224;
@@ -27,4 +28,15 @@ pub fn cookieValidChar(char: u8) bool {
         127...std.math.maxInt(u8) => false,
         else => true,
     };
+}
+
+pub fn fullMatch(re: *const mvzr.Regex, s: []const u8) bool {
+    const m = re.matchPos(0, s) orelse return false;
+    return m.end == s.len;
+}
+
+test "fullMatch" {
+    const re = mvzr.compile("a").?;
+    try std.testing.expect(fullMatch(&re, "a"));
+    try std.testing.expect(!fullMatch(&re, "ab"));
 }

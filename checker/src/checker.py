@@ -30,6 +30,7 @@ from utils import (
     assert_not_in,
     assert_status,
     get_short_url,
+    paste,
     re_escape,
     register_domain,
     register_user,
@@ -54,9 +55,11 @@ async def _putflag(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB)
     domain = f"{lower_noise(2**7)}.com"
     await register_domain(client, domain)
 
-    url = await shorten_url(client, domain, f"/{quote(task.flag)}")
+    short_url = await shorten_url(client, domain, f"/{quote(task.flag)}")
 
-    await submit_page(client, False, domain, "/", url)
+    paste_url = await paste(client, short_url)
+
+    await submit_page(client, False, domain, paste_url.raw_path.decode())
 
     await db.set("cookie", client.cookies["user_account"])
     await db.set("domain", domain)
@@ -91,10 +94,12 @@ async def _put_public_documents(client: Client, db: ChainDB) -> None:
     await register_domain(client, domain)
 
     words = word_noise(2**7)
-    await submit_page(client, True, domain, "/", words)
+    paste_url = await paste(client, words)
+    await submit_page(client, True, domain, paste_url.raw_path.decode())
 
     for _ in range(9):
-        await submit_page(client, True, domain, f"/{alnum_noise(2**7)}", word_noise(2**4))
+        paste_url = await paste(client, word_noise(2**4))
+        await submit_page(client, True, domain, paste_url.raw_path.decode())
 
     await db.set("domain", domain)
     await db.set("words", words)

@@ -1,3 +1,4 @@
+const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
 const search = @import("search.zig");
 const std = @import("std");
@@ -203,16 +204,12 @@ pub const Search = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         for (s.results.results) |r| try w.print(
             \\<p>
-            \\  <a href="http://{d}.{d}.{d}.{d}:{d}{f}">{f}</a>
+            \\  <a href="http://{f}{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
             \\  <small><font color="green">{f}{f}</font></small>
             \\</p>
         , .{
-            r.domain.?.ipv4[0],
-            r.domain.?.ipv4[1],
-            r.domain.?.ipv4[2],
-            r.domain.?.ipv4[3],
-            r.domain.?.port,
+            r.domain.?,
             Escape{ .string = r.path.? },
             Escape{ .string = r.title.? },
             Escape{ .string = r.text },
@@ -299,7 +296,7 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
-    domains: []const @import("Domain.zig"),
+    domains: []const Domain,
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
@@ -319,14 +316,16 @@ pub const SearchConsole = struct {
         for (s.domains) |*d| {
             try w.print(
                 \\<span>{f}</span>
-                \\<span>{d}.{d}.{d}.{d}</span>
+                \\<span>{f}</span>
                 \\<span>{d}</span>
             , .{
                 Escape{ .string = d.domain },
-                d.ipv4[0],
-                d.ipv4[1],
-                d.ipv4[2],
-                d.ipv4[3],
+                struct {
+                    domain: *const Domain,
+                    pub fn format(inner_self: *const @This(), inner_w: *std.Io.Writer) !void {
+                        try inner_self.domain.formatIpv4(inner_w);
+                    }
+                }{ .domain = d },
                 d.port,
             });
         }
@@ -374,10 +373,6 @@ pub const SearchConsole = struct {
             \\  <select id="submit_page_domain" name="domain">{f}</select>
             \\  <label for="submit_page_path">Path:</label>
             \\  <input id="submit_page_path" name="path" size="32" value="/">
-            \\  <label for="submit_page_title">Title:</label>
-            \\  <input id="submit_page_title" name="title" size="32">
-            \\  <label for="submit_page_text">Text:</label>
-            \\  <textarea id="submit_page_text" name="text" cols="64" rows="8"></textarea>
             \\  <input type="submit" name="form_submit_page" value="Submit">
             \\</form>
             \\<a name="shorten_url">Shorten URL</a>
