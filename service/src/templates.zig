@@ -1,9 +1,6 @@
-const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
-const SafeSearch = @import("SafeSearch.zig");
 const search = @import("search.zig");
 const std = @import("std");
-const User = @import("User.zig");
 
 const Escape = struct {
     string: []const u8,
@@ -141,6 +138,7 @@ const Columns = struct {
             \\      <a href="/">Home</a>
             \\      <a href="/console">Search Console</a>
             \\      <a href="/preferences">Preferences</a>
+            \\      <a href="/pastebin">Pastebin</a>
             \\      <a href="/help">Search Tips</a>
             \\    </nav>
             \\    {f}
@@ -244,8 +242,8 @@ pub const Search = struct {
 };
 
 pub const Preferences = struct {
-    user: ?User,
-    safe_search: SafeSearch,
+    user: ?@import("User.zig"),
+    safe_search: @import("SafeSearch.zig"),
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Preferences");
@@ -301,7 +299,7 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
-    domains: []const Domain,
+    domains: []const @import("Domain.zig"),
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
@@ -412,6 +410,37 @@ pub const SearchConsole = struct {
     }
 };
 
+pub const Pastebin = struct {
+    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll("Pastebin");
+    }
+
+    fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll(
+            \\<p>Paste some text to be hosted on the server for a limited time.</p>
+            \\<form method="POST" class="form">
+            \\  <label for="title">Title:</label>
+            \\  <input id="title" name="title" size="32">
+            \\  <label for="text">Text:</label>
+            \\  <textarea id="text" name="text" cols="64" rows="8"></textarea>
+            \\  <input type="submit" value="Submit">
+            \\</form>
+        );
+    }
+
+    fn format(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Columns{
+            .self = &{},
+            .formatTitleFn = &formatTitle,
+            .formatMainFn = &formatMain,
+        }).interface().format(w);
+    }
+
+    pub fn interface(self: *const @This()) Template {
+        return .{ .self = self, .formatFn = &format };
+    }
+};
+
 pub const SearchTips = struct {
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Tips");
@@ -471,6 +500,36 @@ pub const Message = struct {
             .self = self,
             .formatTitleFn = &formatTitle,
             .formatMainFn = &formatMain,
+        }).interface().format(w);
+    }
+
+    pub fn interface(self: *const @This()) Template {
+        return .{ .self = self, .formatFn = &format };
+    }
+};
+
+pub const Paste = struct {
+    paste: *const @import("Paste.zig"),
+
+    fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try w.print("{f}", .{Escape{ .string = s.paste.title }});
+    }
+
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        var it = std.mem.splitAny(u8, s.paste.text, "\r\n");
+        while (it.next()) |l| {
+            if (l.len == 0) continue;
+            try w.print("<p>{f}</p>", .{Escape{ .string = l }});
+        }
+    }
+
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Base{
+            .self = self,
+            .formatTitleFn = &formatTitle,
+            .formatBodyFn = &formatBody,
         }).interface().format(w);
     }
 

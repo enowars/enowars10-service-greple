@@ -2,6 +2,7 @@ const Document = @import("Document.zig");
 const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
 const IndexEntry = @import("IndexEntry.zig");
+const Paste = @import("Paste.zig");
 const Query = @import("Query.zig");
 const SafeSearch = @import("SafeSearch.zig");
 const search = @import("search.zig");
@@ -29,7 +30,6 @@ fn shutdown(_: i32) callconv(.c) noreturn {
 fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
     var writer: std.Io.Writer.Allocating = .init(alloc);
     defer writer.deinit();
-    try writer.writer.writeAll("Error:");
     for (@errorName(err)) |c| {
         if (std.ascii.isUpper(c)) try writer.writer.writeByte(' ');
         try writer.writer.writeByte(c);
@@ -59,7 +59,7 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
             break :blk error.InternalServerError;
         },
     };
-    const message = errorMessage(res.arena, safe_err) catch "Error: Internal Server Error";
+    const message = errorMessage(res.arena, safe_err) catch "Internal Server Error";
     templates.respond(res, (templates.Message{
         .title = "Error",
         .message = message,
@@ -285,6 +285,31 @@ fn postPreferences(_: @This(), req: *httpz.Request, res: *httpz.Response) !void 
     return error.InvalidRequest;
 }
 
+fn getPastebin(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
+    try templates.respond(res, (templates.Pastebin{}).interface());
+}
+
+fn postPastebin(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+    const data = try req.formData();
+
+    const title = data.get("title") orelse return error.InvalidRequest;
+    const text = data.get("text") orelse return error.InvalidRequest;
+
+    const paste: Paste = .{
+        .hash = utils.hash(title), // TODO: use random id
+        .title = title,
+        .text = text,
+    };
+    try paste.put();
+
+    var writer: std.Io.Writer.Allocating = .init(res.arena);
+    defer writer.deinit();
+    try writer.writer.print("/p/{s}", .{std.fmt.bytesToHex(paste.hash, .lower)});
+
+    res.status = 302;
+    res.headers.add("Location", try writer.toOwnedSlice());
+}
+
 fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     const hash = req.param("hash") orelse return error.InvalidRequest;
 
@@ -303,6 +328,13 @@ fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
 
     res.status = 302;
     res.headers.add("Location", try writer.toOwnedSlice());
+}
+
+fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
+    const hash = req.param("hash") orelse return error.InvalidRequest;
+    var paste: Paste = try .get(req.arena, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
+    defer paste.deinit(res.arena);
+    try templates.respond(res, (templates.Paste{ .paste = &paste }).interface());
 }
 
 fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
@@ -332,6 +364,7 @@ pub fn main() !void {
     try makeDir("documents");
     try makeDir("domains");
     try makeDir("index");
+    try makeDir("pastes");
     try makeDir("urls");
     try makeDir("users");
 
@@ -354,7 +387,10 @@ pub fn main() !void {
     router.post("/console", postSearchConsole, .{});
     router.get("/preferences", getPreferences, .{});
     router.post("/preferences", postPreferences, .{});
+    router.get("/pastebin", getPastebin, .{});
+    router.post("/pastebin", postPastebin, .{});
     router.get("/u/:hash", getUrl, .{});
+    router.get("/p/:hash", getPaste, .{});
     router.get("/help", getHelp, .{});
     router.get("/static/logo.gif", getLogoGif, .{});
 

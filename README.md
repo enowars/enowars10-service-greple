@@ -27,6 +27,7 @@ Greple is a web search engine that allows users to:
 | `GET` | `/search` | N/A | Perform search queries (params: `q`, `btnI`) |
 | `GET` | `/help` | N/A | Search tips and documentation |
 | `GET` | `/u/:hash` | N/A | URL shortener redirect |
+| `GET` | `/p/:hash` | N/A | Pastebin document |
 | `GET` | `/static/logo.gif` | N/A | Logo image |
 | `GET` | `/preferences` | N/A | View current preferences |
 | `POST` | `/preferences` | `form_user_account` | Login / Register user |
@@ -35,6 +36,8 @@ Greple is a web search engine that allows users to:
 | `POST` | `/console` | `form_register_domain` | Register a new domain |
 | `POST` | `/console` | `form_submit_page` | Submit a page for indexing |
 | `POST` | `/console` | `form_shorten_url` | Generate short URL |
+| `GET` | `/pastebin` | N/A | View form for pastebin |
+| `POST` | `/pastebin` | N/A | Submit pastebin document |
 
 ## Flagstore 0
 
