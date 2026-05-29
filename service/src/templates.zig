@@ -444,11 +444,12 @@ pub const SearchTips = struct {
     fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
             \\<li><a href="#basic">Basic Search</a></li>
-            \\<li><a href="#and">Automatic "and" Queries</a></li>
-            \\<li><a href="#stopwords">What is a stopword?</a></li>
+            \\<li><a href="#phrase">Multi-word Searches</a></li>
+            \\<li><a href="#site">Site Search</a></li>
             \\<li><a href="#context">See your search terms in context</a></li>
-            \\<li><a href="#stemming">Does Greple use stemming?</a></li>
+            \\<li><a href="#stemming">Stemming and Wildcards</a></li>
             \\<li><a href="#case">Does capitalization matter?</a></li>
+            \\<li><a href="#lucky">I'm Feeling Lucky</a></li>
         );
     }
 

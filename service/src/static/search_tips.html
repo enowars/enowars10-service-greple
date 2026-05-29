@@ -1,48 +1,34 @@
-<!-- TODO: update information on query syntax -->
 <a name="basic"><b>Basic Search</b></a>
 <p>To enter a query into Greple, just type in a few descriptive words and hit
-the 'enter' key (or click on the Greple Search button) for your list of relevant
-results.</p>
-<p>Greple uses sophisticated text-matching techniques to find pages that are
-both important and relevant to your search. For instance, when Greple analyzes a
-page, it looks at what those pages linking to that page have to say about it.
-Greple also prefers pages in which your query terms are near each other.</p>
-<a name="and"><b>Automatic "and" Queries</b></a>
-<p>By default, Greple only returns those pages that include all of your search
-terms. There is no need to include "and" between terms.</p>
-<p>For example, to plan a vacation to Hawaii, simply type</p>
-<form action="/search">
+the 'enter' key (or click on the Greple Search button) for your list of
+relevant results.</p>
+<p>Greple performs a literal text search across the pages it has indexed and
+returns the pages whose content best matches your query.</p>
+<a name="phrase"><b>Multi-word Searches</b></a>
+<p>When you enter more than one word, Greple looks for pages where those words
+appear next to each other, in the order you typed them. Words may be separated
+by any combination of whitespace or punctuation in the page, but no other words
+are allowed between them.</p>
+<p>For example, to find pages about a vacation in Hawaii, simply type</p>
+<form action="/search" style="margin-bottom: 1rem">
   <input name="q" size="32" value="vacation hawaii">
   <input type="submit" value="Greple Search" name="btnG">
 </form>
-<p>To restrict a search further, just include more terms.</p>
-<p>Greple does support the logical "or" operator. To tell Greple to look for
-pages containing either word A or word B, use a capitalized 'OR' between terms.
-For example, to search for a vacation in either London or Paris, just type</p>
+<a name="site"><b>Site Search</b></a>
+<p>To restrict your search to a single website, prefix a domain with
+<code>site:</code>. The <code>site:</code> term may appear anywhere in your
+query and is not itself part of the phrase that Greple looks for in the page.</p>
+<p>For example, to search for pages about vacations on example.com:</p>
 <form action="/search" style="margin-bottom: 1rem">
-  <input name="q" size="32" value="vacation london OR paris">
-  <input type="submit" value="Greple Search" name="btnG">
-</form>
-<a name="stopwords"><b>Stop Words</b></a>
-<p>Greple ignores common words and characters, known as stop words. Greple
-automatically disregards such terms as <em>"where"</em> and <em>"how,"</em> as
-well as certain single digits and single letters, because these terms rarely
-help narrow a search, and can slow down searching significantly.</p>
-<p>Use the "+" sign to include stop words in your search. Be sure to include a
-space before the "+" sign. You can also include the "+" sign in phrase
-searches.</p>
-<p>For example, to search for Star Wars, Episode I:</p>
-<form action="/search" style="margin-bottom: 1rem">
-  <input name="q" size="32" value="Episode +I">
+  <input name="q" size="32" value="site:example.com vacation hawaii">
   <input type="submit" value="Greple Search" name="btnG">
 </form>
 <a name="context"><b>See your search terms in context</b></a>
-<p>Each Greple search result contains one or more excerpt from the web page,
-which shows how your search terms are used in context on that page. Your search
-terms are bolded so you can tell at a glance whether the result is a page you
-want to visit.</p>
-<a name="stemming"><b>Stemming</b></a>
-<p>To provide the most accurate results, Greple does not use "stemming" or
+<p>Each Greple search result contains a short excerpt from the matching page,
+which shows how your search terms are used in context on that page. This lets
+you tell at a glance whether the result is a page you want to visit.</p>
+<a name="stemming"><b>Stemming and Wildcards</b></a>
+<p>To provide the most predictable results, Greple does not use "stemming" or
 support "wildcard" searches. In other words, Greple searches for exactly the
 words that you enter in the search box. Searching for "grepl" or "grepl*" will
 not yield "grepler" or "greplin." If in doubt, try both forms: "airline" and
@@ -52,3 +38,14 @@ not yield "grepler" or "greplin." If in doubt, try both forms: "airline" and
 you type them, will be understood as lower case. For example, searches for
 "george washington", "George Washington", and "gEoRgE wAsHiNgToN" will all
 return the same results.</p>
+<a name="lucky"><b>I'm Feeling Lucky</b></a>
+<p>Next to the Greple Search button you'll find an "I'm Feeling Lucky" button.
+When you click it, Greple takes you straight to the top-ranked result for your
+query, skipping the list of results entirely. It's the fastest way to reach a
+page when you're confident your query identifies it uniquely.</p>
+<p>If your query returns no results, the "I'm Feeling Lucky" button behaves the
+same as Greple Search and shows the (empty) results page instead.</p>
+<form action="/search" style="margin-bottom: 1rem">
+  <input name="q" size="32" value="vacation hawaii">
+  <input type="submit" value="I'm Feeling Lucky" name="btnI">
+</form>
