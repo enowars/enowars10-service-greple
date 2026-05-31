@@ -54,7 +54,7 @@ pub fn init(
                 "/verify",
                 "application/octet-stream",
             ) catch |err| {
-                std.log.warn("IPv4 verification failed {s} {}", .{ ipv4, err });
+                std.log.info("IPv4 verification failed {s} {}", .{ ipv4, err });
                 return error.Ipv4VerificationFailed;
             };
             defer alloc.free(body);

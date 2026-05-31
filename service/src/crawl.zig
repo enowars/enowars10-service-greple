@@ -17,7 +17,7 @@ pub fn crawl(alloc: std.mem.Allocator, public: bool, domain: *const Domain, path
     try domain.formatIpv4(&ipv4.writer);
 
     const body = utils.fetch(alloc, ipv4.written(), domain.port, path, "text/html") catch |err| {
-        std.log.warn("Indexing failed {f}{s} {}", .{ domain, path, err });
+        std.log.info("Indexing failed {f}{s} {}", .{ domain, path, err });
         return error.IndexingFailed;
     };
     defer alloc.free(body);

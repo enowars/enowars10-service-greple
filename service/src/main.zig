@@ -39,6 +39,7 @@ fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
 }
 
 pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
+    std.log.info("500 {} {s} {}", .{ req.method, req.url.path, err });
     const safe_err = switch (err) {
         error.DomainTooLong,
         error.InvalidDomain,
@@ -67,8 +68,7 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
             res.status = 500;
             break :blk internal_err;
         },
-        else => |leftover_err| blk: {
-            std.log.info("500 {} {s} {}", .{ req.method, req.url.path, leftover_err });
+        else => blk: {
             res.status = 500;
             break :blk error.InternalServerError;
         },
