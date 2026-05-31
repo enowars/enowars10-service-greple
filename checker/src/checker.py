@@ -42,8 +42,8 @@ _CHECKER = Enochecker("greple", 7777)
 
 
 @_CHECKER.register_dependency
-def _client(client: httpx.AsyncClient) -> Client:
-    return Client.wrap(client)
+def _client(client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Client:
+    return Client.wrap(client, logger)
 
 
 @_CHECKER.putflag(0)

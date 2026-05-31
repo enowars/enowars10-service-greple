@@ -1,5 +1,6 @@
 """A http client wrapper."""
 
+import logging
 from types import TracebackType
 from typing import Self, Type, cast
 
@@ -11,6 +12,8 @@ class Client(httpx.AsyncClient):
     """A wrapped http client."""
 
     last_request: httpx.Request | None
+    _last_response: httpx.Response | None
+    _logger: logging.LoggerAdapter
 
     async def send(
         self,
@@ -22,7 +25,8 @@ class Client(httpx.AsyncClient):
     ) -> httpx.Response:
         """Send a request."""
         self.last_request = request
-        return await super().send(request, stream=stream, auth=auth, follow_redirects=follow_redirects)
+        self._last_response = await super().send(request, stream=stream, auth=auth, follow_redirects=follow_redirects)
+        return self._last_response
 
     async def __aenter__(self: Self) -> Self:
         """Enter context."""
@@ -35,12 +39,16 @@ class Client(httpx.AsyncClient):
         traceback: TracebackType | None = None,
     ) -> None:
         """Exit context."""
+        if exc_value is not None and self._last_response is not None:
+            self._logger.info("Last response was %s", self._last_response.text)
         if type(exc_value) is MumbleException and exc_value.message is not None and self.last_request is not None:
             exc_value.message += f" ({self.last_request.method} {self.last_request.url.raw_path.decode()})"
 
     @classmethod
-    def wrap(cls, client: httpx.AsyncClient) -> Self:
+    def wrap(cls, client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Self:
         """Wrap a http client."""
         client.__class__ = cls
         cast("Self", client).last_request = None
+        cast("Self", client)._last_response = None
+        cast("Self", client)._logger = logger
         return cast("Self", client)
