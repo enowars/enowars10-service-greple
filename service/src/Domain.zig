@@ -19,8 +19,8 @@ fn parseIpv4(ipv4: []const u8) !u32 {
     return utils.ipv4ToInt(try std.net.Ip4Address.parse(ipv4, 1));
 }
 
-fn comptimeIpv4(comptime ipv4: []const u8) u32 {
-    return parseIpv4(ipv4) catch @compileError("Invalid IPv4");
+fn bytesToIpv4(bytes: [4]u8) u32 {
+    return utils.ipv4ToInt(std.net.Ip4Address.init(bytes, 1));
 }
 
 pub fn init(
@@ -33,16 +33,31 @@ pub fn init(
     if (!utils.fullMatch(&re, domain)) return error.InvalidDomain;
 
     const i = parseIpv4(ipv4) catch return error.InvalidIpv4;
-    const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
-
     switch (i) {
-        comptimeIpv4("10.0.0.0")...comptimeIpv4("10.255.255.255"),
-        comptimeIpv4("172.16.0.0")...comptimeIpv4("172.31.255.255"),
-        comptimeIpv4("192.168.0.0")...comptimeIpv4("192.168.255.255"),
+        bytesToIpv4(.{ 0, 0, 0, 0 })...bytesToIpv4(.{ 0, 255, 255, 255 }), // "This host on this network"
+        bytesToIpv4(.{ 100, 64, 0, 0 })...bytesToIpv4(.{ 100, 127, 255, 255 }), // Shared Address Space
+        bytesToIpv4(.{ 127, 0, 0, 0 })...bytesToIpv4(.{ 127, 255, 255, 255 }), // Loopback
+        bytesToIpv4(.{ 169, 254, 0, 0 })...bytesToIpv4(.{ 169, 254, 255, 255 }), // Link Local
+        bytesToIpv4(.{ 172, 16, 0, 0 })...bytesToIpv4(.{ 172, 31, 255, 255 }), // Private-Use
+        bytesToIpv4(.{ 192, 0, 0, 0 })...bytesToIpv4(.{ 192, 0, 0, 255 }), // IETF Protocol Assignments
+        bytesToIpv4(.{ 192, 0, 2, 0 })...bytesToIpv4(.{ 192, 0, 2, 255 }), // Documentation (TEST-NET-1)
+        bytesToIpv4(.{ 192, 88, 99, 0 })...bytesToIpv4(.{ 192, 88, 99, 255 }), // 6to4 Relay Anycast
+        bytesToIpv4(.{ 192, 168, 0, 0 })...bytesToIpv4(.{ 192, 168, 255, 255 }), // Private-Use
+        bytesToIpv4(.{ 198, 18, 0, 0 })...bytesToIpv4(.{ 198, 19, 255, 255 }), // Benchmarking
+        bytesToIpv4(.{ 198, 51, 100, 0 })...bytesToIpv4(.{ 198, 51, 100, 255 }), // Documentation (TEST-NET-2)
+        bytesToIpv4(.{ 203, 0, 113, 0 })...bytesToIpv4(.{ 203, 0, 113, 255 }), // Documentation (TEST-NET-3)
+        bytesToIpv4(.{ 240, 0, 0, 0 })...bytesToIpv4(.{ 255, 255, 255, 255 }), // Reserved
+        => return error.InvalidIpv4,
+        else => {},
+    }
+    switch (@as(u8, @truncate(i))) {
+        0, // Gateway
+        255, // Broadcast
         => return error.InvalidIpv4,
         else => {},
     }
 
+    const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
     switch (p) {
         // TODO: allow port 80
         // TODO: add other service ports
