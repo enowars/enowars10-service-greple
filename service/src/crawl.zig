@@ -12,50 +12,14 @@ const p_re = mvzr.compile("<p>.*?</p>").?;
 pub fn crawl(alloc: std.mem.Allocator, public: bool, domain: *const Domain, path: []const u8) !struct { IndexEntry, Document } {
     if (!utils.fullMatch(&path_re, path)) return error.InvalidPath;
 
-    var client: std.http.Client = .{ .allocator = alloc };
-    defer client.deinit();
-
     var ipv4: std.Io.Writer.Allocating = .init(alloc);
     defer ipv4.deinit();
     try domain.formatIpv4(&ipv4.writer);
 
-    const connection = try client.connectTcp(ipv4.written(), domain.port, .plain);
-
-    var request: std.http.Client.Request = .{
-        .uri = .{
-            .scheme = "http",
-            .host = .{ .percent_encoded = ipv4.written() },
-            .port = domain.port,
-            .path = .{ .percent_encoded = path },
-        },
-        .client = &client,
-        .connection = connection,
-        .reader = .{
-            .in = connection.reader(),
-            .state = .ready,
-            .interface = undefined,
-            .max_head_len = client.read_buffer_size,
-        },
-        .keep_alive = false,
-        .method = .GET,
-        .transfer_encoding = .none,
-        .redirect_behavior = .not_allowed,
-        .handle_continue = true,
-        .headers = .{},
-        .extra_headers = &.{},
-        .privileged_headers = &.{},
+    const body = utils.fetch(alloc, ipv4.written(), domain.port, path, "text/html") catch |err| {
+        std.log.warn("Indexing failed {f}{s} {}", .{ domain, path, err });
+        return error.IndexingFailed;
     };
-    defer request.deinit();
-    try request.sendBodiless();
-
-    var response = try request.receiveHead(&.{});
-    if (response.head.status != .ok) return error.IndexingFailed;
-    if (response.head.content_type) |c| {
-        if (std.mem.eql(u8, c, "text/html")) return error.IndexingFailed;
-    } else return error.IndexingFailed;
-
-    var reader = response.reader(&.{});
-    const body = try reader.allocRemaining(alloc, .unlimited);
     defer alloc.free(body);
 
     const title = title_re.match(body) orelse return error.IndexingFailed;

@@ -22,8 +22,6 @@ from client import Client
 from exploit import calibrate_redos, exploit_sca_letter
 from noise import alnum_noise, lower_noise, word_noise
 from utils import (
-    FLAG_URL_IPV4,
-    FLAG_URL_PORT,
     SHORT_URL_LENGTH,
     SHORT_URL_PREFIX,
     SHORT_URL_REGEX,
@@ -151,7 +149,7 @@ async def _exploit_sca(
     short_url = SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await get_short_url(client, short_url)
-    return unquote(url.removeprefix(f"http://{FLAG_URL_IPV4}:{FLAG_URL_PORT}/"))
+    return unquote(url.removeprefix(f"{client.base_url}/"))
 
 
 def app() -> fastapi.FastAPI:

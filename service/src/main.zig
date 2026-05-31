@@ -61,7 +61,9 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
             res.status = 403;
             break :blk forbidden_err;
         },
-        error.IndexingFailed => |internal_err| blk: {
+        error.IndexingFailed,
+        error.Ipv4VerificationFailed,
+        => |internal_err| blk: {
             res.status = 500;
             break :blk internal_err;
         },
@@ -142,7 +144,7 @@ fn postSearchConsoleRegisterDomain(
     const ipv4 = data.get("ipv4") orelse return error.InvalidRequest;
     const port = data.get("port") orelse return error.InvalidRequest;
 
-    const d: Domain = try .init(user, domain, ipv4, port);
+    const d: Domain = try .init(res.arena, user, domain, ipv4, port);
     try d.put();
 
     res.status = 302;
@@ -327,6 +329,12 @@ fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Paste{ .paste = &paste }).interface());
 }
 
+fn getVerify(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
+    res.content_type = .BINARY;
+    const ipv4 = utils.ipv4ToInt(req.address.in); // TODO: don't panic on ipv6
+    res.body = try res.arena.dupe(u8, &utils.ipv4VerificationToken(ipv4));
+}
+
 fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.SearchTips{}).interface());
 }
@@ -381,6 +389,7 @@ pub fn main() !void {
     router.post("/pastebin", postPastebin, .{});
     router.get("/u/:hash", getUrl, .{});
     router.get("/p/:hash", getPaste, .{});
+    router.get("/verify", getVerify, .{});
     router.get("/help", getHelp, .{});
     router.get("/static/logo.gif", getLogoGif, .{});
 

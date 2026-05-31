@@ -2,16 +2,13 @@ const httpz = @import("httpz");
 const std = @import("std");
 const utils = @import("utils.zig");
 
-const key = "change me"; // TODO: change secret
-const Hmac = std.crypto.auth.hmac.Hmac(utils.HashFn);
-
 hash: utils.Hash,
 username: []const u8,
-hmac: [Hmac.mac_length]u8,
+hmac: utils.Hmac,
 
 pub fn parse(req: *const httpz.Request) !?@This() {
     var username: ?[]const u8 = null;
-    var hmac: ?[Hmac.mac_length]u8 = null;
+    var hmac: ?utils.Hmac = null;
 
     if (req.cookies().get("user_account")) |c| {
         var it = std.mem.splitScalar(u8, c, '&');
@@ -23,16 +20,14 @@ pub fn parse(req: *const httpz.Request) !?@This() {
                 if (std.mem.eql(u8, k, "username")) {
                     username = v;
                 } else if (std.mem.eql(u8, k, "hmac")) {
-                    hmac = utils.hexToBytes(Hmac.mac_length, v) catch null;
+                    hmac = utils.hexToBytes(@sizeOf(utils.Hmac), v) catch null;
                 }
             }
         }
     }
 
     if (username) |u| if (hmac) |h| {
-        var expected: [Hmac.mac_length]u8 = undefined;
-        Hmac.create(&expected, u, key);
-        if (std.mem.eql(u8, &h, &expected)) return .{
+        if (std.mem.eql(u8, &h, &utils.hmac(u))) return .{
             .hash = utils.hash(u),
             .username = u,
             .hmac = h,
@@ -73,12 +68,9 @@ pub fn login(user: []const u8, password: []const u8) !@This() {
 
     if (!try checkUserPassword(hash, password)) return error.InvalidCredentials;
 
-    var hmac: [Hmac.mac_length]u8 = undefined;
-    Hmac.create(&hmac, user, key);
-
     return .{
         .hash = hash,
         .username = user,
-        .hmac = hmac,
+        .hmac = utils.hmac(user),
     };
 }

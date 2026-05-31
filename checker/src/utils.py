@@ -21,9 +21,6 @@ def re_escape(s: str) -> str:
     return s.translate({ord(c): rf"\{c}" for c in r"^$.*?+{|()\["})
 
 
-FLAG_URL_IPV4 = "1.1.1.1"
-FLAG_URL_PORT = 80
-
 SHORT_URL_PREFIX = "/u/"
 SHORT_URL_ALPHABET = string.digits + string.ascii_lowercase[: 16 - len(string.digits)]
 SHORT_URL_LENGTH = 64 // 4
@@ -132,8 +129,8 @@ async def register_domain(client: Client, domain: str) -> None:
         "/console",
         data={
             "domain": domain,
-            "ipv4": "127.0.0.1",
-            "port": 7777,
+            "ipv4": client.base_url.host,
+            "port": client.base_url.port,
             "form_register_domain": "Register",
         },
     )

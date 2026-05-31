@@ -8,37 +8,73 @@ const re = mvzr.compile("([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9][a-z0-9
 hash: utils.Hash,
 user_hash: utils.Hash,
 domain: []const u8,
-ipv4: [4]u8,
+ipv4: u32,
 port: u16,
 
 fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
     return std.fs.cwd().openDir("domains", args);
 }
 
-pub fn init(user: *const User, domain: []const u8, ipv4: []const u8, port: []const u8) !@This() {
+fn parseIpv4(ipv4: []const u8) !u32 {
+    return utils.ipv4ToInt(try std.net.Ip4Address.parse(ipv4, 1));
+}
+
+fn comptimeIpv4(comptime ipv4: []const u8) u32 {
+    return parseIpv4(ipv4) catch @compileError("Invalid IPv4");
+}
+
+pub fn init(
+    alloc: std.mem.Allocator,
+    user: *const User,
+    domain: []const u8,
+    ipv4: []const u8,
+    port: []const u8,
+) !@This() {
     if (!utils.fullMatch(&re, domain)) return error.InvalidDomain;
 
-    const addr = std.net.Ip4Address.parse(ipv4, 1) catch return error.InvalidIpv4;
+    const i = parseIpv4(ipv4) catch return error.InvalidIpv4;
     const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
 
-    switch (addr.sa.addr) {
-        std.net.Ip4Address.init(.{ 127, 0, 0, 1 }, 1).sa.addr => {
-            if (p != 7777) return error.InvalidPort;
+    switch (i) {
+        comptimeIpv4("10.0.0.0")...comptimeIpv4("10.255.255.255"),
+        comptimeIpv4("172.16.0.0")...comptimeIpv4("172.31.255.255"),
+        comptimeIpv4("192.168.0.0")...comptimeIpv4("192.168.255.255"),
+        => return error.InvalidIpv4,
+        else => {},
+    }
+
+    switch (p) {
+        // TODO: allow port 80
+        // TODO: add other service ports
+        7777 => {
+            const body = utils.fetch(
+                alloc,
+                ipv4,
+                7777,
+                "/verify",
+                "application/octet-stream",
+            ) catch |err| {
+                std.log.warn("IPv4 verification failed {s} {}", .{ ipv4, err });
+                return error.Ipv4VerificationFailed;
+            };
+            defer alloc.free(body);
+            if (!std.mem.eql(u8, body, &utils.ipv4VerificationToken(i))) return error.Ipv4VerificationFailed;
         },
-        else => return error.InvalidIpv4,
+        else => return error.InvalidPort,
     }
 
     return .{
         .hash = utils.hash(domain),
         .user_hash = user.hash,
         .domain = domain,
-        .ipv4 = std.mem.asBytes(&addr.sa.addr).*,
+        .ipv4 = i,
         .port = p,
     };
 }
 
 pub fn formatIpv4(self: *const @This(), writer: *std.Io.Writer) !void {
-    try writer.print("{d}.{d}.{d}.{d}", .{ self.ipv4[0], self.ipv4[1], self.ipv4[2], self.ipv4[3] });
+    const bytes = std.mem.asBytes(&self.ipv4);
+    try writer.print("{d}.{d}.{d}.{d}", .{ bytes[3], bytes[2], bytes[1], bytes[0] });
 }
 
 pub fn format(self: *const @This(), writer: *std.Io.Writer) !void {
@@ -60,7 +96,7 @@ pub fn put(self: *const @This()) !void {
     try writer.interface.writeAll(&self.user_hash);
     try writer.interface.writeInt(u16, @truncate(self.domain.len), .little);
     try writer.interface.writeAll(self.domain);
-    try writer.interface.writeAll(&self.ipv4);
+    try writer.interface.writeInt(u32, self.ipv4, .little);
     try writer.interface.writeInt(u16, self.port, .little);
 }
 
@@ -68,14 +104,14 @@ fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, hash: utils.Hash) !@Thi
     var file = try dir.openFile(&std.fmt.bytesToHex(hash, .lower), .{});
     defer file.close();
 
-    var buffer: [@max(@sizeOf(utils.Hash), @sizeOf(u16), @sizeOf([4]u8))]u8 = undefined;
+    var buffer: [@max(@sizeOf(utils.Hash), @sizeOf(u16), @sizeOf(u32))]u8 = undefined;
     var reader = file.reader(&buffer);
 
     return .{
         .hash = hash,
         .user_hash = (try reader.interface.takeArray(@sizeOf(utils.Hash))).*,
         .domain = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
-        .ipv4 = (try reader.interface.takeArray(4)).*,
+        .ipv4 = try reader.interface.takeInt(u32, .little),
         .port = try reader.interface.takeInt(u16, .little),
     };
 }
