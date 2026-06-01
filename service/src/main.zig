@@ -329,10 +329,9 @@ fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     try templates.respond(res, (templates.Paste{ .paste = &paste }).interface());
 }
 
-fn getVerify(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
+fn getVerify(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
     res.content_type = .BINARY;
-    const ipv4 = utils.ipv4ToInt(req.address.in); // TODO: don't panic on ipv6
-    res.body = try res.arena.dupe(u8, &utils.ipv4VerificationToken(ipv4));
+    res.body = try res.arena.dupe(u8, &utils.hmac(""));
 }
 
 fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {

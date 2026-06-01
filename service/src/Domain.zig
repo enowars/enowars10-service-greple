@@ -33,55 +33,36 @@ pub fn init(
     if (!utils.fullMatch(&re, domain)) return error.InvalidDomain;
 
     const i = parseIpv4(ipv4) catch return error.InvalidIpv4;
-    switch (i) {
-        bytesToIpv4(.{ 0, 0, 0, 0 })...bytesToIpv4(.{ 0, 255, 255, 255 }), // "This host on this network"
-        bytesToIpv4(.{ 100, 64, 0, 0 })...bytesToIpv4(.{ 100, 127, 255, 255 }), // Shared Address Space
-        bytesToIpv4(.{ 127, 0, 0, 0 })...bytesToIpv4(.{ 127, 255, 255, 255 }), // Loopback
-        bytesToIpv4(.{ 169, 254, 0, 0 })...bytesToIpv4(.{ 169, 254, 255, 255 }), // Link Local
-        bytesToIpv4(.{ 172, 16, 0, 0 })...bytesToIpv4(.{ 172, 31, 255, 255 }), // Private-Use
-        bytesToIpv4(.{ 192, 0, 0, 0 })...bytesToIpv4(.{ 192, 0, 0, 255 }), // IETF Protocol Assignments
-        bytesToIpv4(.{ 192, 0, 2, 0 })...bytesToIpv4(.{ 192, 0, 2, 255 }), // Documentation (TEST-NET-1)
-        bytesToIpv4(.{ 192, 88, 99, 0 })...bytesToIpv4(.{ 192, 88, 99, 255 }), // 6to4 Relay Anycast
-        bytesToIpv4(.{ 192, 168, 0, 0 })...bytesToIpv4(.{ 192, 168, 255, 255 }), // Private-Use
-        bytesToIpv4(.{ 198, 18, 0, 0 })...bytesToIpv4(.{ 198, 19, 255, 255 }), // Benchmarking
-        bytesToIpv4(.{ 198, 51, 100, 0 })...bytesToIpv4(.{ 198, 51, 100, 255 }), // Documentation (TEST-NET-2)
-        bytesToIpv4(.{ 203, 0, 113, 0 })...bytesToIpv4(.{ 203, 0, 113, 255 }), // Documentation (TEST-NET-3)
-        bytesToIpv4(.{ 240, 0, 0, 0 })...bytesToIpv4(.{ 255, 255, 255, 255 }), // Reserved
-        => return error.InvalidIpv4,
+    switch (@as(u8, @truncate(i))) {
+        0, 255 => return error.InvalidIpv4,
         else => {},
     }
-    switch (@as(u8, @truncate(i))) {
-        0, // Gateway
-        255, // Broadcast
-        => return error.InvalidIpv4,
-        else => {},
+    switch (i) {
+        bytesToIpv4(.{ 10, 0, 0, 0 })...bytesToIpv4(.{ 10, 255, 255, 255 }),
+        bytesToIpv4(.{ 91, 99, 0, 0 })...bytesToIpv4(.{ 91, 99, 255, 255 }), // CICD TODO: remove
+        bytesToIpv4(.{ 172, 18, 0, 1 }), // Local testing TODO: remove
+        => {},
+        else => return error.InvalidIpv4,
     }
 
     const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
     switch (p) {
-        // TODO: allow port 80
-        1337,
-        1991,
-        3000,
-        4859,
-        7777,
-        9999,
-        => {
-            const body = utils.fetch(
-                alloc,
-                ipv4,
-                7777,
-                "/verify",
-                "application/octet-stream",
-            ) catch |err| {
-                std.log.info("IPv4 verification failed {s} {}", .{ ipv4, err });
-                return error.Ipv4VerificationFailed;
-            };
-            defer alloc.free(body);
-            if (!std.mem.eql(u8, body, &utils.ipv4VerificationToken(i))) return error.Ipv4VerificationFailed;
-        },
+        1337, 1991, 3000, 4859, 7777, 9999 => {},
         else => return error.InvalidPort,
     }
+
+    const body = utils.fetch(
+        alloc,
+        ipv4,
+        7777,
+        "/verify",
+        "application/octet-stream",
+    ) catch |err| {
+        std.log.info("IPv4 verification failed {s} {}", .{ ipv4, err });
+        return error.Ipv4VerificationFailed;
+    };
+    defer alloc.free(body);
+    if (!std.mem.eql(u8, body, &utils.hmac(""))) return error.Ipv4VerificationFailed;
 
     return .{
         .hash = utils.hash(domain),
