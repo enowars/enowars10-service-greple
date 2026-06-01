@@ -169,7 +169,7 @@ fn postSearchConsoleSubmitPage(
         index_entry.deinit(res.arena);
         document.deinit(res.arena);
     }
-    try index_entry.put(res.arena);
+    try index_entry.put();
     try document.put(&index_entry);
 
     try templates.respond(res, (templates.Message{

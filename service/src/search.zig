@@ -46,8 +46,24 @@ const Result = struct {
     }
 };
 
-fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []const u8) !std.StringHashMap(Result) {
-    var results: std.StringHashMap(Result) = .init(alloc);
+const Key = struct {
+    domain_hash: utils.Hash,
+    path_hash: utils.Hash,
+};
+const Context = struct {
+    pub fn hash(_: @This(), k: Key) u64 {
+        const d = std.mem.readInt(u64, k.domain_hash[0..8], .little);
+        const p = std.mem.readInt(u64, k.path_hash[0..8], .little);
+        return d ^ p;
+    }
+    pub fn eql(_: @This(), a: Key, b: Key) bool {
+        return std.mem.eql(u8, &a.domain_hash, &b.domain_hash) and std.mem.eql(u8, &a.path_hash, &b.path_hash);
+    }
+};
+const HashMap = std.HashMap(Key, Result, Context, std.hash_map.default_max_load_percentage);
+
+fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []const u8) !HashMap {
+    var results: HashMap = .init(alloc);
 
     var it = std.mem.splitScalar(u8, stdout, '\n');
     while (it.next()) |l| {
@@ -59,11 +75,10 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
         const filename = split.next().?;
         const text = split.rest();
 
-        const domain = if (query.domain) |d| d.hash else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
-        const path = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
-        const key = try std.mem.concat(alloc, u8, &.{ &domain, &path });
-        errdefer alloc.free(key);
-
+        const key: Key = .{
+            .domain_hash = if (query.domain) |d| d.hash else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?),
+            .path_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename),
+        };
         const result = try results.getOrPut(key);
         if (result.found_existing) {
             result.value_ptr.addMatch(text);
@@ -87,7 +102,7 @@ fn getTop10Results(
     alloc: std.mem.Allocator,
     user: ?User,
     safe_search: SafeSearch,
-    results: std.StringHashMap(Result),
+    results: HashMap,
 ) !struct { results: []const *const Result, filtered: usize } {
     var regex: ?Regex = if (safe_search.enabled) .compile(safe_search.regex) else null;
 
@@ -109,25 +124,21 @@ fn getTop10Results(
             }
         }
 
-        var entry: IndexEntry = try .get(
-            alloc,
-            e.key_ptr.*[0..@sizeOf(utils.Hash)].*,
-            e.key_ptr.*[@sizeOf(utils.Hash) .. @sizeOf(utils.Hash) * 2].*,
-        );
-        e.value_ptr.path = entry.path;
-        e.value_ptr.title = entry.title;
+        var entry: IndexEntry = try .get(alloc, e.key_ptr.domain_hash, e.key_ptr.path_hash);
+        errdefer entry.deinit(alloc);
 
-        var domain: ?Domain = null;
-        if (e.value_ptr.domain == null) {
-            domain = try .get(alloc, entry.domain_hash);
-            e.value_ptr.domain = domain;
-        }
+        var domain: Domain = e.value_ptr.domain orelse try .get(alloc, e.key_ptr.domain_hash);
+        errdefer if (e.value_ptr.domain == null) domain.deinit(alloc);
 
-        if ((if (user) |u| !std.mem.eql(u8, &e.value_ptr.domain.?.user_hash, &u.hash) else true) and !entry.public) {
-            if (domain) |*d| d.deinit(alloc);
+        if ((if (user) |u| !std.mem.eql(u8, &domain.user_hash, &u.hash) else true) and !entry.public) {
             entry.deinit(alloc);
+            if (e.value_ptr.domain == null) domain.deinit(alloc);
             continue;
         }
+
+        e.value_ptr.domain = domain;
+        e.value_ptr.path = entry.path;
+        e.value_ptr.title = entry.title;
 
         if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();
         top10_results.insertAssumeCapacity(i, e.value_ptr);

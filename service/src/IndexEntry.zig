@@ -11,24 +11,22 @@ pub fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
     return std.fs.cwd().openDir("index", args);
 }
 
-fn genFilename(alloc: std.mem.Allocator, domain_hash: utils.Hash, path_hash: utils.Hash) ![]const u8 {
-    return std.mem.concat(alloc, u8, &.{
-        &std.fmt.bytesToHex(domain_hash, .lower),
-        &std.fmt.bytesToHex(path_hash, .lower),
-    });
+fn genFilename(domain_hash: utils.Hash, path_hash: utils.Hash) [@sizeOf(utils.Hash) * 2]u8 {
+    const d: @Vector(@sizeOf(utils.Hash), u8) = domain_hash;
+    const p: @Vector(@sizeOf(utils.Hash), u8) = path_hash;
+    const xor: utils.Hash = d ^ p;
+    return std.fmt.bytesToHex(xor, .lower);
 }
 
-pub fn put(self: *const @This(), alloc: std.mem.Allocator) !void {
+pub fn put(self: *const @This()) !void {
     if (self.path.len > std.math.maxInt(u16)) return error.PathTooLong;
     if (self.title.len > std.math.maxInt(u16)) return error.TitleTooLong;
 
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = try genFilename(alloc, self.domain_hash, self.path_hash);
-    defer alloc.free(filename);
-
-    var file = try dir.createFile(filename, .{ .exclusive = true });
+    const filename = genFilename(self.domain_hash, self.path_hash);
+    var file = try dir.createFile(&filename, .{ .exclusive = true });
     defer file.close();
 
     var writer = file.writer(&.{});
@@ -44,10 +42,8 @@ pub fn get(alloc: std.mem.Allocator, domain_hash: utils.Hash, path_hash: utils.H
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = try genFilename(alloc, domain_hash, path_hash);
-    defer alloc.free(filename);
-
-    const file = try dir.openFile(filename, .{});
+    const filename = genFilename(domain_hash, path_hash);
+    const file = try dir.openFile(&filename, .{});
     defer file.close();
 
     var buffer: [@max(1, @sizeOf(utils.Hash), @sizeOf(u16))]u8 = undefined;
