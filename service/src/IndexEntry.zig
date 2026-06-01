@@ -12,10 +12,7 @@ pub fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
 }
 
 fn genFilename(domain_hash: utils.Hash, path_hash: utils.Hash) [@sizeOf(utils.Hash) * 2]u8 {
-    const d: @Vector(@sizeOf(utils.Hash), u8) = domain_hash;
-    const p: @Vector(@sizeOf(utils.Hash), u8) = path_hash;
-    const xor: utils.Hash = d ^ p;
-    return std.fmt.bytesToHex(xor, .lower);
+    return std.fmt.bytesToHex(utils.combineHashes(domain_hash, path_hash), .lower);
 }
 
 pub fn put(self: *const @This()) !void {

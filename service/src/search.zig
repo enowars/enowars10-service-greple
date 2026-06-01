@@ -52,9 +52,9 @@ const Key = struct {
 };
 const Context = struct {
     pub fn hash(_: @This(), k: Key) u64 {
-        const d = std.mem.readInt(u64, k.domain_hash[0..8], .little);
-        const p = std.mem.readInt(u64, k.path_hash[0..8], .little);
-        return d ^ p;
+        const d = std.mem.readInt(u32, k.domain_hash[0..4], .little);
+        const p = std.mem.readInt(u32, k.path_hash[0..4], .little);
+        return @as(u64, d) << 32 | p;
     }
     pub fn eql(_: @This(), a: Key, b: Key) bool {
         return std.mem.eql(u8, &a.domain_hash, &b.domain_hash) and std.mem.eql(u8, &a.path_hash, &b.path_hash);

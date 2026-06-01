@@ -13,6 +13,10 @@ pub fn hash(data: []const u8) Hash {
     return h;
 }
 
+pub fn combineHashes(a: Hash, b: Hash) Hash {
+    return (a[0 .. @sizeOf(Hash) / 2] ++ b[@sizeOf(Hash) / 2 ..]).*;
+}
+
 pub fn hmac(data: []const u8) Hmac {
     var h: Hmac = undefined;
     HmacFn.create(&h, data, key);

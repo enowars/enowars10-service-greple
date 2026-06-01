@@ -290,11 +290,7 @@ fn postPastebin(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     const title = data.get("title") orelse return error.InvalidRequest;
     const text = data.get("text") orelse return error.InvalidRequest;
 
-    const paste: Paste = .{
-        .hash = utils.hash(title), // TODO: use random id
-        .title = title,
-        .text = text,
-    };
+    const paste: Paste = .init(title, text);
     try paste.put();
 
     var writer: std.Io.Writer.Allocating = .init(res.arena);

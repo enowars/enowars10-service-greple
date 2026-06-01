@@ -9,7 +9,12 @@ const path_re = mvzr.compile("(/([a-zA-Z0-9\\-._~]|%[0-9a-fA-F]{2})+)+/?|/").?;
 const title_re = mvzr.compile("<title>.*?</title>").?;
 const p_re = mvzr.compile("<p>.*?</p>").?;
 
-pub fn crawl(alloc: std.mem.Allocator, public: bool, domain: *const Domain, path: []const u8) !struct { IndexEntry, Document } {
+pub fn crawl(
+    alloc: std.mem.Allocator,
+    public: bool,
+    domain: *const Domain,
+    path: []const u8,
+) !struct { IndexEntry, Document } {
     if (!utils.fullMatch(&path_re, path)) return error.InvalidPath;
 
     var ipv4: std.Io.Writer.Allocating = .init(alloc);

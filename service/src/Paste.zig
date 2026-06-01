@@ -9,6 +9,14 @@ fn openDir() !std.fs.Dir {
     return std.fs.cwd().openDir("pastes", .{});
 }
 
+pub fn init(title: []const u8, text: []const u8) @This() {
+    return .{
+        .hash = utils.combineHashes(utils.hash(title), utils.hash(text)),
+        .title = title,
+        .text = text,
+    };
+}
+
 pub fn put(self: *const @This()) !void {
     if (self.title.len > std.math.maxInt(u16)) return error.TitleTooLong;
     if (self.text.len > std.math.maxInt(u16)) return error.TextTooLong;
@@ -16,7 +24,11 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir();
     defer dir.close();
 
-    var file = try dir.createFile(&std.fmt.bytesToHex(self.hash, .lower), .{ .exclusive = true });
+    const filename = std.fmt.bytesToHex(self.hash, .lower);
+    var file = dir.createFile(&filename, .{ .exclusive = true }) catch |err| switch (err) {
+        std.fs.File.OpenError.PathAlreadyExists => return,
+        else => |leftover_err| return leftover_err,
+    };
     defer file.close();
 
     var writer = file.writer(&.{});
