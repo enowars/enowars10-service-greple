@@ -70,9 +70,9 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
         if (l.len == 0) continue;
 
         var split = std.mem.splitAny(u8, l, ":/");
-        std.debug.assert(std.mem.eql(u8, split.next().?, "."));
-        const dirname = if (query.domain) |_| null else split.next().?;
-        const filename = split.next().?;
+        std.debug.assert(std.mem.eql(u8, split.next() orelse return error.UnexpectedGrepStdout, "."));
+        const dirname = if (query.domain) |_| null else (split.next() orelse return error.UnexpectedGrepStdout);
+        const filename = split.next() orelse return error.UnexpectedGrepStdout;
         const text = split.rest();
 
         const key: Key = .{
