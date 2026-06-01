@@ -100,10 +100,14 @@ fn getTop10Results(
 
         if (i == top10_results.capacity) continue;
 
-        if (regex) |*r| if (r.match(e.value_ptr.text)) |_| {
-            filtered += 1;
-            continue;
-        };
+        if (regex) |*r| {
+            utils.setNice(18);
+            defer utils.setNice(0);
+            if (r.match(e.value_ptr.text)) |_| {
+                filtered += 1;
+                continue;
+            }
+        }
 
         var entry: IndexEntry = try .get(
             alloc,

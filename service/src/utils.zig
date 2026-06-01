@@ -101,6 +101,13 @@ pub fn ipv4VerificationToken(ipv4: u32) Hmac {
     return hmac(std.mem.asBytes(&ipv4));
 }
 
+pub fn setNice(nice: u32) void {
+    _ = std.os.linux.sched_setattr(0, &.{
+        .policy = @intFromEnum(std.os.linux.SCHED.Mode.NORMAL),
+        .nice = nice,
+    }, 0);
+}
+
 test "fullMatch" {
     const re = mvzr.compile("a").?;
     try std.testing.expect(fullMatch(&re, "a"));
