@@ -60,8 +60,13 @@ pub fn init(
     const p = std.fmt.parseInt(u16, port, 10) catch return error.InvalidPort;
     switch (p) {
         // TODO: allow port 80
-        // TODO: add other service ports
-        7777 => {
+        1337,
+        1991,
+        3000,
+        4859,
+        7777,
+        9999,
+        => {
             const body = utils.fetch(
                 alloc,
                 ipv4,
