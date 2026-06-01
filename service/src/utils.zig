@@ -48,32 +48,80 @@ pub fn fullMatch(re: *const mvzr.Regex, s: []const u8) bool {
     return m.end == s.len;
 }
 
+fn setTimeout(fd: std.posix.fd_t, level: i32, optname: u32) !void {
+    try std.posix.setsockopt(fd, level, optname, std.mem.asBytes(&std.posix.timeval{ .sec = 0, .usec = 1e5 }));
+}
+
+fn connect(addr: std.net.Address) !std.net.Stream {
+    const fd = try std.posix.socket(
+        addr.any.family,
+        std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC,
+        std.posix.IPPROTO.TCP,
+    );
+    errdefer std.net.Stream.close(.{ .handle = fd });
+
+    try setTimeout(fd, std.posix.IPPROTO.TCP, std.posix.TCP.USER_TIMEOUT);
+    try setTimeout(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO);
+    try setTimeout(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO);
+
+    try std.posix.connect(fd, &addr.any, addr.getOsSockLen());
+
+    return .{ .handle = fd };
+}
+
+pub fn formatIpv4(ipv4: u32, writer: *std.Io.Writer) !void {
+    const bytes = std.mem.asBytes(&ipv4);
+    try writer.print("{d}.{d}.{d}.{d}", .{ bytes[3], bytes[2], bytes[1], bytes[0] });
+}
+
 pub fn fetch(
     alloc: std.mem.Allocator,
-    ipv4: []const u8,
+    ipv4: u32,
     port: u16,
     path: []const u8,
     content_type: []const u8,
 ) ![]const u8 {
-    var client: std.http.Client = .{ .allocator = alloc };
-    defer client.deinit();
+    const stream = try connect(.{
+        .in = .{ .sa = .{ .addr = @byteSwap(ipv4), .port = @byteSwap(port) } },
+    });
+    defer stream.close();
 
-    const connection = try client.connectTcp(ipv4, port, .plain);
+    const read_buffer = try alloc.alloc(u8, (std.http.Client{ .allocator = undefined }).read_buffer_size);
+    defer alloc.free(read_buffer);
+
+    const write_buffer = try alloc.alloc(u8, (std.http.Client{ .allocator = undefined }).write_buffer_size);
+    defer alloc.free(write_buffer);
+
+    var connection: std.http.Client.Connection = .{
+        .client = undefined,
+        .stream_writer = stream.writer(write_buffer),
+        .stream_reader = stream.reader(read_buffer),
+        .pool_node = .{},
+        .port = port,
+        .host_len = 0,
+        .proxied = false,
+        .closing = false,
+        .protocol = .plain,
+    };
+
+    var host: std.Io.Writer.Allocating = .init(alloc);
+    defer host.deinit();
+    try formatIpv4(ipv4, &host.writer);
 
     var request: std.http.Client.Request = .{
         .uri = .{
             .scheme = "http",
-            .host = .{ .percent_encoded = ipv4 },
+            .host = .{ .percent_encoded = host.written() },
             .port = port,
             .path = .{ .percent_encoded = path },
         },
-        .client = &client,
-        .connection = connection,
+        .client = undefined,
+        .connection = &connection,
         .reader = .{
             .in = connection.reader(),
             .state = .ready,
             .interface = undefined,
-            .max_head_len = client.read_buffer_size,
+            .max_head_len = read_buffer.len,
         },
         .keep_alive = false,
         .method = .GET,
@@ -84,7 +132,6 @@ pub fn fetch(
         .extra_headers = &.{},
         .privileged_headers = &.{},
     };
-    defer request.deinit();
     try request.sendBodiless();
 
     var response = try request.receiveHead(&.{});
@@ -95,14 +142,6 @@ pub fn fetch(
 
     var reader = response.reader(&.{});
     return reader.allocRemaining(alloc, .unlimited);
-}
-
-pub fn ipv4ToInt(ipv4: std.net.Ip4Address) u32 {
-    return @byteSwap(ipv4.sa.addr);
-}
-
-pub fn ipv4VerificationToken(ipv4: u32) Hmac {
-    return hmac(std.mem.asBytes(&ipv4));
 }
 
 pub fn setNice(nice: u32) void {

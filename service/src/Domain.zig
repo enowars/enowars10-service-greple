@@ -15,12 +15,16 @@ fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
     return std.fs.cwd().openDir("domains", args);
 }
 
+fn ipv4ToInt(ipv4: std.net.Ip4Address) u32 {
+    return @byteSwap(ipv4.sa.addr);
+}
+
 fn parseIpv4(ipv4: []const u8) !u32 {
-    return utils.ipv4ToInt(try std.net.Ip4Address.parse(ipv4, 1));
+    return ipv4ToInt(try std.net.Ip4Address.parse(ipv4, 1));
 }
 
 fn bytesToIpv4(bytes: [4]u8) u32 {
-    return utils.ipv4ToInt(std.net.Ip4Address.init(bytes, 1));
+    return ipv4ToInt(std.net.Ip4Address.init(bytes, 1));
 }
 
 pub fn init(
@@ -51,13 +55,7 @@ pub fn init(
         else => return error.InvalidPort,
     }
 
-    const body = utils.fetch(
-        alloc,
-        ipv4,
-        7777,
-        "/verify",
-        "application/octet-stream",
-    ) catch |err| {
+    const body = utils.fetch(alloc, i, 7777, "/verify", "application/octet-stream") catch |err| {
         std.log.info("IPv4 verification failed {s} {}", .{ ipv4, err });
         return error.Ipv4VerificationFailed;
     };
@@ -73,13 +71,8 @@ pub fn init(
     };
 }
 
-pub fn formatIpv4(self: *const @This(), writer: *std.Io.Writer) !void {
-    const bytes = std.mem.asBytes(&self.ipv4);
-    try writer.print("{d}.{d}.{d}.{d}", .{ bytes[3], bytes[2], bytes[1], bytes[0] });
-}
-
 pub fn format(self: *const @This(), writer: *std.Io.Writer) !void {
-    try formatIpv4(self, writer);
+    try utils.formatIpv4(self.ipv4, writer);
     try writer.print(":{d}", .{self.port});
 }
 

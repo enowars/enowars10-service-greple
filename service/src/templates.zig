@@ -2,6 +2,7 @@ const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
 const search = @import("search.zig");
 const std = @import("std");
+const utils = @import("utils.zig");
 
 const Escape = struct {
     string: []const u8,
@@ -323,7 +324,7 @@ pub const SearchConsole = struct {
                 struct {
                     domain: *const Domain,
                     pub fn format(inner_self: *const @This(), inner_w: *std.Io.Writer) !void {
-                        try inner_self.domain.formatIpv4(inner_w);
+                        try utils.formatIpv4(inner_self.domain.ipv4, inner_w);
                     }
                 }{ .domain = d },
                 d.port,

@@ -17,11 +17,7 @@ pub fn crawl(
 ) !struct { IndexEntry, Document } {
     if (!utils.fullMatch(&path_re, path)) return error.InvalidPath;
 
-    var ipv4: std.Io.Writer.Allocating = .init(alloc);
-    defer ipv4.deinit();
-    try domain.formatIpv4(&ipv4.writer);
-
-    const body = utils.fetch(alloc, ipv4.written(), domain.port, path, "text/html") catch |err| {
+    const body = utils.fetch(alloc, domain.ipv4, domain.port, path, "text/html") catch |err| {
         std.log.info("Indexing failed {f}{s} {}", .{ domain, path, err });
         return error.IndexingFailed;
     };
