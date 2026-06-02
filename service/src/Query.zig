@@ -42,7 +42,6 @@ pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
             it.delimiter = site_seperators;
             defer it.delimiter = seperators;
             if (it.peek()) |s| if (s.len > 0) {
-                // TODO: handle url not found
                 domain = Domain.get(alloc, utils.hash(it.next().?)) catch |err| switch (err) {
                     std.fs.File.OpenError.FileNotFound => return null,
                     else => |leftover_err| return leftover_err,

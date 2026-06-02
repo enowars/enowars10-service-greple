@@ -22,8 +22,7 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = genFilename(self.domain_hash, self.path_hash);
-    var file = try dir.createFile(&filename, .{ .exclusive = true });
+    var file = try dir.createFile(&genFilename(self.domain_hash, self.path_hash), .{});
     defer file.close();
 
     var writer = file.writer(&.{});

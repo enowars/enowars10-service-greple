@@ -19,13 +19,12 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     var domain_dir = try dir.openDir(&dirname, .{});
     defer domain_dir.close();
 
-    var file = try domain_dir.createFile(&std.fmt.bytesToHex(index_entry.path_hash, .lower), .{ .exclusive = true });
+    var file = try domain_dir.createFile(&std.fmt.bytesToHex(index_entry.path_hash, .lower), .{});
     defer file.close();
 
-    for (self.text) |l| {
-        try file.writeAll(l);
-        try file.writeAll("\n");
-    }
+    var writer = file.writer(&.{});
+
+    for (self.text) |l| try writer.interface.print("{s}\n", .{l});
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
