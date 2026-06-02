@@ -99,9 +99,8 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
             .results = &.{},
             .time = 0,
             .total = 0,
-            .filtered = 0,
         };
-        break :blk try search.performSearch(res.arena, user, safe_search, &query);
+        break :blk try search.performSearch(res.arena, &user, &safe_search, &query);
     };
 
     if (query_params.has("btnI") and results.results.len > 0) {

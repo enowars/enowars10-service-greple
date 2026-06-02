@@ -185,7 +185,7 @@ pub const Search = struct {
             \\  </form>
             \\  <div style="padding:2pt;color:white;background:#3366cc;display:flex;justify-content:space-between">
             \\    <small>Searched the web for <b>{f}</b>.</small>
-            \\    <small>Results <b>{d} - {d}</b> of {s}<b>{d}</b>. Search took <b>{d:.3}</b> seconds.</small>
+            \\    <small>Results <b>{d} - {d}</b> of <b>{d}</b>. Search took <b>{d:.3}</b> seconds.</small>
             \\  </div>
             \\</div>
         , .{
@@ -193,7 +193,6 @@ pub const Search = struct {
             Escape{ .string = s.q },
             @min(s.results.results.len, 1),
             s.results.results.len,
-            if (s.results.total > s.results.results.len) "about " else "",
             s.results.total,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });
@@ -213,12 +212,6 @@ pub const Search = struct {
             Escape{ .string = r.text },
             Escape{ .string = r.url.? },
         });
-        if (s.results.filtered > 0) try w.print(
-            \\<p style="font-size: small">We have removed {d} results from this
-            \\page because they were filtered out by your safe search settings.
-            \\If you wish to see these results, you can adjust your filter
-            \\settings in your search preferences.</p>
-        , .{s.results.filtered});
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {

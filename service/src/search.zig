@@ -48,17 +48,27 @@ const Result = struct {
     }
 };
 
-const Context = struct {
+const HashMap = std.HashMap(utils.Hash, Result, struct {
     pub fn hash(_: @This(), k: utils.Hash) u64 {
         return std.mem.readInt(u64, k[0..8], .little);
     }
     pub fn eql(_: @This(), a: utils.Hash, b: utils.Hash) bool {
         return std.mem.eql(u8, &a, &b);
     }
-};
-const HashMap = std.HashMap(utils.Hash, Result, Context, std.hash_map.default_max_load_percentage);
+}, std.hash_map.default_max_load_percentage);
 
-fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []const u8) !HashMap {
+// TODO: add test in checker to ensure allowed complexity isn't reduced
+const Regex = mvzr.SizedRegex(42, 2);
+
+fn aggregateResults(
+    alloc: std.mem.Allocator,
+    user: *const ?User,
+    safe_search: *const SafeSearch,
+    query: *const Query,
+    stdout: []const u8,
+) !HashMap {
+    const regex: ?Regex = if (safe_search.enabled) .compile(safe_search.regex) else null;
+
     var results: HashMap = .init(alloc);
 
     var it = std.mem.splitScalar(u8, stdout, '\n');
@@ -71,15 +81,32 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
         const filename = split.next() orelse return error.UnexpectedGrepStdout;
         const text = split.rest();
 
+        if (regex) |*r| {
+            utils.setNice(18);
+            defer utils.setNice(0);
+            if (r.isMatch(text)) continue;
+        }
+
+        const user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
         const url_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
+
+        var entry: IndexEntry = try .get(alloc, user_hash, url_hash);
+        errdefer entry.deinit(alloc);
+
+        const owner_match = if (user.*) |u| std.mem.eql(u8, &user_hash, &u.hash) else false;
+        if (!owner_match and !entry.public) {
+            entry.deinit(alloc);
+            continue;
+        }
+
         const result = try results.getOrPut(url_hash);
         if (result.found_existing) {
             result.value_ptr.addMatch(text);
         } else {
             result.key_ptr.* = url_hash;
-            result.value_ptr.user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
-            result.value_ptr.url = null;
-            result.value_ptr.title = null;
+            result.value_ptr.user_hash = user_hash;
+            result.value_ptr.url = entry.url;
+            result.value_ptr.title = entry.title;
             result.value_ptr.text = text;
             result.value_ptr.score = 0;
         }
@@ -88,82 +115,44 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
     return results;
 }
 
-// TODO: add test in checker to ensure allowed complexity isn't reduced
-const Regex = mvzr.SizedRegex(42, 2);
-
-fn getTop10Results(
-    alloc: std.mem.Allocator,
-    user: ?User,
-    safe_search: SafeSearch,
-    results: HashMap,
-) !struct { results: []const *const Result, filtered: usize } {
-    var regex: ?Regex = if (safe_search.enabled) .compile(safe_search.regex) else null;
-
+fn getTop10Results(alloc: std.mem.Allocator, results: HashMap) ![]const *const Result {
     var top10_results: std.ArrayList(*const Result) = try .initCapacity(alloc, @min(10, results.count()));
-    var filtered: usize = 0;
+    defer top10_results.deinit(alloc);
 
     var it = results.iterator();
     while (it.next()) |e| {
         const i = std.sort.upperBound(*const Result, top10_results.items, e.value_ptr, Result.order);
-
         if (i == top10_results.capacity) continue;
-
-        if (regex) |*r| {
-            utils.setNice(18);
-            defer utils.setNice(0);
-            if (r.match(e.value_ptr.text)) |_| {
-                filtered += 1;
-                continue;
-            }
-        }
-
-        var entry: IndexEntry = try .get(alloc, e.value_ptr.user_hash, e.key_ptr.*);
-        errdefer entry.deinit(alloc);
-
-        const owner_match = if (user) |u| std.mem.eql(u8, &e.value_ptr.user_hash, &u.hash) else false;
-        if (!owner_match and !entry.public) {
-            entry.deinit(alloc);
-            continue;
-        }
-
-        e.value_ptr.url = entry.url;
-        e.value_ptr.title = entry.title;
-
         if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();
         top10_results.insertAssumeCapacity(i, e.value_ptr);
     }
 
-    return .{
-        .results = top10_results.items,
-        .filtered = filtered,
-    };
+    return try top10_results.toOwnedSlice(alloc);
 }
 
 pub const Results = struct {
     results: []const *const Result,
     time: u64,
     total: usize,
-    filtered: usize,
 };
 
 pub fn performSearch(
     alloc: std.mem.Allocator,
-    user: ?User,
-    safe_search: SafeSearch,
+    user: *const ?User,
+    safe_search: *const SafeSearch,
     query: *const Query,
 ) !Results {
     var timer: std.time.Timer = try .start();
 
     const stdout = try performGrep(alloc, query);
-    const results = try aggregateResults(alloc, query, stdout);
-    const top10_results = try getTop10Results(alloc, user, safe_search, results);
+    const results = try aggregateResults(alloc, user, safe_search, query, stdout);
+    const top10_results = try getTop10Results(alloc, results);
 
     const time = timer.read();
 
     return .{
-        .results = top10_results.results,
+        .results = top10_results,
         .time = time,
-        .total = if (top10_results.results.len < 10) top10_results.results.len else results.count(),
-        .filtered = top10_results.filtered,
+        .total = if (top10_results.len < 10) top10_results.len else results.count(),
     };
 }
