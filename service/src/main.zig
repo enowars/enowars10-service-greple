@@ -13,6 +13,8 @@ const Url = @import("Url.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
 
+pub const std_options: std.Options = .{ .http_disable_tls = true };
+
 const cookie_opts: httpz.response.CookieOpts = .{
     .http_only = true,
     .same_site = .strict,
