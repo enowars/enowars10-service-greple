@@ -1,6 +1,9 @@
 const httpz = @import("httpz");
+const mvzr = @import("mvzr");
 const std = @import("std");
 const utils = @import("utils.zig");
+
+const re = mvzr.compile("[a-zA-Z0-9]+").?;
 
 hash: utils.Hash,
 username: []const u8,
@@ -37,14 +40,12 @@ pub fn parse(req: *const httpz.Request) !?@This() {
     return null;
 }
 
-fn checkUserPassword(user: utils.Hash, password: []const u8) !bool {
+fn checkUserPassword(user: utils.Hash, password_hash: utils.Hash) !bool {
     var dir = try std.fs.cwd().openDir("users", .{});
     defer dir.close();
 
     var file = try dir.createFile(&std.fmt.bytesToHex(user, .lower), .{ .read = true, .truncate = false });
     defer file.close();
-
-    const password_hash = utils.hash(password);
 
     var buffer: [@sizeOf(utils.Hash)]u8 = undefined;
     var reader = file.reader(&buffer);
@@ -60,17 +61,18 @@ fn checkUserPassword(user: utils.Hash, password: []const u8) !bool {
     return std.mem.eql(u8, &password_hash, hash);
 }
 
-pub fn login(user: []const u8, password: []const u8) !@This() {
-    std.debug.assert(user.len > 0);
-    std.debug.assert(password.len > 0);
+pub fn login(username: []const u8, password: []const u8) !@This() {
+    if (!utils.fullMatch(&re, username)) return error.InvalidUsername;
+    if (password.len == 0) return error.InvalidPassword;
 
-    const hash = utils.hash(user);
+    const user_hash = utils.hash(username);
+    const password_hash = utils.hash(password);
 
-    if (!try checkUserPassword(hash, password)) return error.InvalidCredentials;
+    if (!try checkUserPassword(user_hash, password_hash)) return error.InvalidCredentials;
 
     return .{
-        .hash = hash,
-        .username = user,
-        .hmac = utils.hmac(user),
+        .hash = user_hash,
+        .username = username,
+        .hmac = utils.hmac(username),
     };
 }

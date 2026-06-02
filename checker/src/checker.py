@@ -20,7 +20,7 @@ from enochecker3.utils import assert_in
 
 from client import Client
 from exploit import calibrate_redos, exploit_sca_letter
-from noise import alnum_noise, lower_noise, word_noise
+from noise import alnum_noise, word_noise
 from utils import (
     SHORT_URL_LENGTH,
     SHORT_URL_PREFIX,
@@ -30,7 +30,6 @@ from utils import (
     get_short_url,
     paste,
     re_escape,
-    register_domain,
     register_user,
     search,
     set_safe_search,
@@ -48,35 +47,33 @@ def _client(client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Client:
 
 @_CHECKER.putflag(0)
 async def _putflag(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
-    await register_user(client, alnum_noise(2**7))
+    username = alnum_noise(2**7)
+    await register_user(client, username)
 
-    domain = f"{lower_noise(2**7)}.com"
-    await register_domain(client, domain)
+    short_url = await shorten_url(client, f"http://example.com/{quote(task.flag)}")
 
-    short_url = await shorten_url(client, domain, f"/{quote(task.flag)}")
+    paste_url = await paste(client, word_noise(2**4), short_url)
 
-    paste_url = await paste(client, short_url)
+    await submit_page(client, False, str(paste_url).removeprefix("http://"))
 
-    await submit_page(client, False, domain, paste_url.raw_path.decode())
-
+    await db.set("username", username)
     await db.set("cookie", client.cookies["user_account"])
-    await db.set("domain", domain)
 
-    return domain
+    return username
 
 
 @_CHECKER.getflag(0)
 async def _getflag(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB) -> None:
     try:
+        username = await db.get("username")
         cookie = await db.get("cookie")
-        domain = await db.get("domain")
     except KeyError as e:
         raise MumbleException("Missing putflag data in DB") from e
 
     client.cookies["user_account"] = cookie
 
-    text = await search(client, f"site:{domain}")
-    short_url = re.search(SHORT_URL_REGEX, text)
+    body = await search(client, f"user:{username}")
+    short_url = re.search(SHORT_URL_REGEX, body)
     if not short_url:
         raise MumbleException("Failed to find short URL")
 
@@ -85,53 +82,53 @@ async def _getflag(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB)
 
 
 @_CHECKER.putnoise(0)
-async def _put_public_documents(client: Client, db: ChainDB) -> None:
-    await register_user(client, alnum_noise(2**7))
+async def _put_public_document(client: Client, db: ChainDB) -> None:
+    username = alnum_noise(2**7)
+    await register_user(client, username)
 
-    domain = f"{lower_noise(2**7)}.com"
-    await register_domain(client, domain)
+    title = word_noise(2**7)
+    text = word_noise(2**7)
+    paste_url = await paste(client, title, text)
 
-    words = word_noise(2**7)
-    paste_url = await paste(client, words)
-    await submit_page(client, True, domain, paste_url.raw_path.decode())
+    await submit_page(client, True, str(paste_url).removeprefix("http://"))
 
-    for _ in range(9):
-        paste_url = await paste(client, word_noise(2**4))
-        await submit_page(client, True, domain, paste_url.raw_path.decode())
-
-    await db.set("domain", domain)
-    await db.set("words", words)
+    await db.set("username", username)
+    await db.set("title", title)
+    await db.set("text", text)
 
 
 @_CHECKER.getnoise(0)
-async def _get_public_documents(client: Client, db: ChainDB) -> None:
+async def _get_public_document(client: Client, db: ChainDB) -> None:
     try:
-        domain = await db.get("domain")
-        words = await db.get("words")
+        username = await db.get("username")
+        title = await db.get("title")
+        text = await db.get("text")
     except KeyError as e:
         raise MumbleException("Missing putnoise data in DB") from e
 
-    text = await search(client, words)
-    assert_in(domain, text, "Public document not returned as result")
+    body = await search(client, text)
+    assert_in(title, body, "Public document not returned as result")
 
-    text = await search(client, f"site:{domain}")
-    assert_in(words, text, "Public document not returned as result")
-    assert_in("of <b>10</b>.", text, "Unexpected result count")
+    body = await search(client, f"user:{username}")
+    assert_in(title, body, "Public document not returned as result")
+    assert_in(text, body, "Public document not returned as result")
+    assert_in("of <b>1</b>.", body, "Unexpected result count")
 
-    query = urlencode({"q": words, "btnI": "I'm Feeling Lucky"})
+    query = urlencode({"q": text, "btnI": "I'm Feeling Lucky"})
     res = await client.get(f"/search?{query}")
     assert_status(res, 302)
     if not res.next_request:
         raise MumbleException("No redirect location")
 
-    word = random.choice(words.split(" "))
+    word = random.choice(text.split(" "))
     await set_safe_search(client, True, re_escape(word))
 
-    text = await search(client, words)
-    assert_not_in(domain, text, "Public document not filtered by safe search")
+    body = await search(client, text)
+    assert_not_in(title, body, "Public document not filtered by safe search")
 
-    text = await search(client, f"site:{domain}")
-    assert_not_in(words, text, "Public document not filtered by safe search")
+    body = await search(client, f"user:{username}")
+    assert_not_in(title, body, "Public document not filtered by safe search")
+    assert_not_in(text, body, "Public document not filtered by safe search")
 
 
 @_CHECKER.exploit(0)
@@ -149,7 +146,7 @@ async def _exploit_sca(
     short_url = SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await get_short_url(client, short_url)
-    return unquote(url.removeprefix(f"{client.base_url}/"))
+    return unquote(url.removeprefix("http://example.com/"))
 
 
 def app() -> fastapi.FastAPI:

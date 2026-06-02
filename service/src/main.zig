@@ -1,6 +1,5 @@
 const crawl = @import("crawl.zig");
 const Document = @import("Document.zig");
-const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
 const IndexEntry = @import("IndexEntry.zig");
 const Paste = @import("Paste.zig");
@@ -41,19 +40,15 @@ fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
 }
 
 pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
-    std.log.info("500 {} {s} {}", .{ req.method, req.url.path, err });
     const safe_err = switch (err) {
-        error.DomainTooLong,
-        error.InvalidDomain,
-        error.InvalidIpv4,
-        error.InvalidPath,
-        error.InvalidPort,
+        error.InvalidPassword,
         error.InvalidRequest,
+        error.InvalidUrl,
+        error.InvalidUsername,
         error.MissingUsernameOrPassword,
-        error.PathTooLong,
         error.TextTooLong,
         error.TitleTooLong,
-        error.UrlAlreadyShort,
+        error.UrlTooLong,
         => |bad_request_err| blk: {
             res.status = 400;
             break :blk bad_request_err;
@@ -64,8 +59,8 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
             res.status = 403;
             break :blk forbidden_err;
         },
+        error.DnsResolutionFailed,
         error.IndexingFailed,
-        error.Ipv4VerificationFailed,
         => |internal_err| blk: {
             res.status = 500;
             break :blk internal_err;
@@ -75,6 +70,7 @@ pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err:
             break :blk error.InternalServerError;
         },
     };
+    std.log.info("{d} {} {s} {}", .{ res.status, req.method, req.url.path, err });
     const message = errorMessage(res.arena, safe_err) catch "Internal Server Error";
     templates.respond(res, (templates.Message{
         .title = "Error",
@@ -109,15 +105,8 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     };
 
     if (query_params.has("btnI") and results.results.len > 0) {
-        var writer: std.Io.Writer.Allocating = .init(res.arena);
-        defer writer.deinit();
-        try writer.writer.print("http://{f}{s}", .{
-            results.results[0].domain.?,
-            results.results[0].path.?,
-        });
-
         res.status = 302;
-        res.headers.add("Location", try writer.toOwnedSlice());
+        res.headers.add("Location", try res.arena.dupe(u8, results.results[0].url.?));
         return;
     }
 
@@ -128,29 +117,10 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn getSearchConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    if (try User.parse(req)) |*u| {
-        return templates.respond(res, (templates.SearchConsole{
-            .domains = try Domain.getAllOwned(res.arena, u),
-        }).interface());
+    if (try User.parse(req)) |_| {
+        return templates.respond(res, (templates.SearchConsole{}).interface());
     }
     return error.AccessDenied;
-}
-
-fn postSearchConsoleRegisterDomain(
-    req: *const httpz.Request,
-    res: *httpz.Response,
-    user: *const User,
-    data: *const httpz.key_value.StringKeyValue,
-) !void {
-    const domain = data.get("domain") orelse return error.InvalidRequest;
-    const ipv4 = data.get("ipv4") orelse return error.InvalidRequest;
-    const port = data.get("port") orelse return error.InvalidRequest;
-
-    const d: Domain = try .init(res.arena, user, domain, ipv4, port);
-    try d.put();
-
-    res.status = 302;
-    res.headers.add("Location", req.url.path);
 }
 
 fn postSearchConsoleSubmitPage(
@@ -159,14 +129,9 @@ fn postSearchConsoleSubmitPage(
     data: *const httpz.key_value.StringKeyValue,
 ) !void {
     const public = data.has("public");
-    const domain = data.get("domain") orelse return error.InvalidRequest;
-    const path = data.get("path") orelse return error.InvalidRequest;
+    const url = data.get("url") orelse return error.InvalidRequest;
 
-    var d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
-    defer d.deinit(res.arena);
-    if (!std.mem.eql(u8, &d.user_hash, &user.hash)) return error.InvalidRequest;
-
-    var index_entry, var document = try crawl.crawl(res.arena, public, &d, path);
+    var index_entry, var document = try crawl.crawl(res.arena, public, user, url);
     defer {
         index_entry.deinit(res.arena);
         document.deinit(res.arena);
@@ -186,21 +151,17 @@ fn postSearchConsoleShortenUrl(
     res: *httpz.Response,
     data: *const httpz.key_value.StringKeyValue,
 ) !void {
-    const domain = data.get("domain") orelse return error.InvalidRequest;
-    const path = data.get("path") orelse return error.InvalidRequest;
+    const url = data.get("url") orelse return error.InvalidRequest;
 
-    var d: Domain = try .get(res.arena, try utils.hexToBytes(@sizeOf(utils.Hash), domain));
-    defer d.deinit(res.arena);
-
-    const url: Url = try .init(&d, path);
-    try url.put();
+    const u: Url = try .init(url);
+    try u.put();
 
     var writer: std.Io.Writer.Allocating = .init(res.arena);
     defer writer.deinit();
     try writer.writer.writeAll("http://");
-    try writer.writer.writeAll(req.header("host") orelse "127.0.0.1:7777");
+    try writer.writer.writeAll(req.header("host") orelse "[host]");
     try writer.writer.writeAll("/u/");
-    try writer.writer.printHex(&url.hash, .lower);
+    try writer.writer.printHex(&u.hash, .lower);
 
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Shortened URL",
@@ -212,7 +173,6 @@ fn postSearchConsoleShortenUrl(
 fn postSearchConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     if (try User.parse(req)) |*u| {
         const data = try req.formData();
-        if (data.has("form_register_domain")) return postSearchConsoleRegisterDomain(req, res, u, data);
         if (data.has("form_submit_page")) return postSearchConsoleSubmitPage(res, u, data);
         if (data.has("form_shorten_url")) return postSearchConsoleShortenUrl(req, res, data);
         return error.InvalidRequest;
@@ -309,15 +269,8 @@ fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     var url: Url = try .get(req.arena, try utils.hexToBytes(Url.bytes, hash));
     defer url.deinit(res.arena);
 
-    var domain: Domain = try .get(res.arena, url.domain_hash);
-    defer domain.deinit(res.arena);
-
-    var writer: std.Io.Writer.Allocating = .init(res.arena);
-    defer writer.deinit();
-    try writer.writer.print("http://{f}{s}", .{ domain, url.path });
-
     res.status = 302;
-    res.headers.add("Location", try writer.toOwnedSlice());
+    res.headers.add("Location", try std.mem.concat(res.arena, u8, &.{ "http://", url.url }));
 }
 
 fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
@@ -325,11 +278,6 @@ fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     var paste: Paste = try .get(req.arena, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
     defer paste.deinit(res.arena);
     try templates.respond(res, (templates.Paste{ .paste = &paste }).interface());
-}
-
-fn getVerify(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
-    res.content_type = .BINARY;
-    res.body = try res.arena.dupe(u8, &utils.hmac(""));
 }
 
 fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
@@ -357,7 +305,6 @@ pub fn main() !void {
     }, null);
 
     try makeDir("documents");
-    try makeDir("domains");
     try makeDir("index");
     try makeDir("pastes");
     try makeDir("urls");
@@ -386,7 +333,6 @@ pub fn main() !void {
     router.post("/pastebin", postPastebin, .{});
     router.get("/u/:hash", getUrl, .{});
     router.get("/p/:hash", getPaste, .{});
-    router.get("/verify", getVerify, .{});
     router.get("/help", getHelp, .{});
     router.get("/static/logo.gif", getLogoGif, .{});
 

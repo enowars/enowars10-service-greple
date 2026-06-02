@@ -14,13 +14,14 @@ are allowed between them.</p>
   <input name="q" size="32" value="vacation hawaii">
   <input type="submit" value="Greple Search" name="btnG">
 </form>
-<a name="site"><b>Site Search</b></a>
-<p>To restrict your search to a single website, prefix a domain with
-<code>site:</code>. The <code>site:</code> term may appear anywhere in your
-query and is not itself part of the phrase that Greple looks for in the page.</p>
-<p>For example, to search for pages about vacations on example.com:</p>
+<a name="user"><b>User Search</b></a>
+<p>To restrict your search to the pages submitted by a single user, prefix a
+username with <code>user:</code>. The <code>user:</code> term may appear
+anywhere in your query and is not itself part of the phrase that Greple looks
+for in the page. Usernames are alphanumeric.</p>
+<p>For example, to search for pages about vacations submitted by alice:</p>
 <form action="/search" style="margin-bottom: 1rem">
-  <input name="q" size="32" value="site:example.com vacation hawaii">
+  <input name="q" size="32" value="user:alice vacation hawaii">
   <input type="submit" value="Greple Search" name="btnG">
 </form>
 <a name="context"><b>See your search terms in context</b></a>

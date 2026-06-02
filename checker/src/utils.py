@@ -1,6 +1,5 @@
 """Utils for the checker."""
 
-import hashlib
 import re
 import string
 from collections.abc import Collection
@@ -121,29 +120,7 @@ async def _get_console(client: Client) -> None:
         assert_status(res, 200)
 
 
-async def register_domain(client: Client, domain: str) -> None:
-    """Register a domain."""
-    await _get_console(client)
-
-    res = await client.post(
-        "/console",
-        data={
-            "domain": domain,
-            "ipv4": client.base_url.host,
-            "port": client.base_url.port,
-            "form_register_domain": "Register",
-        },
-    )
-    assert_status(res, 302)
-    if res.next_request is None:
-        raise MumbleException("No redirect location")
-
-    res = await client.send(res.next_request)
-    assert_status(res, 200)
-    assert_in(escape(domain), res.text, "Missing registered domain")
-
-
-async def submit_page(client: Client, public: bool, domain: str, path: str) -> None:
+async def submit_page(client: Client, public: bool, url: str) -> None:
     """Submit a page."""
     await _get_console(client)
 
@@ -151,8 +128,7 @@ async def submit_page(client: Client, public: bool, domain: str, path: str) -> N
         "/console",
         data={
             **({"public": "on"} if public else {}),
-            "domain": hashlib.sha224(domain.encode()).hexdigest(),
-            "path": path,
+            "url": url,
             "form_submit_page": "Submit",
         },
     )
@@ -160,18 +136,11 @@ async def submit_page(client: Client, public: bool, domain: str, path: str) -> N
     assert_in("page has been submitted", res.text, "Unexpected result text")
 
 
-async def shorten_url(client: Client, domain: str, path: str) -> str:
+async def shorten_url(client: Client, url: str) -> str:
     """Shorten a URL returning short URL."""
     await _get_console(client)
 
-    res = await client.post(
-        "/console",
-        data={
-            "domain": hashlib.sha224(domain.encode()).hexdigest(),
-            "path": path,
-            "form_shorten_url": "Shorten",
-        },
-    )
+    res = await client.post("/console", data={"url": url, "form_shorten_url": "Shorten"})
     assert_status(res, 200)
     short_url = re.search(SHORT_URL_REGEX, res.text)
     if not short_url:
@@ -180,7 +149,7 @@ async def shorten_url(client: Client, domain: str, path: str) -> str:
     return short_url[0]
 
 
-async def paste(client: Client, text: str) -> httpx.URL:
+async def paste(client: Client, title: str, text: str) -> httpx.URL:
     """Submit text to pastebin returning paste url."""
     if (
         client.last_request is None
@@ -190,7 +159,7 @@ async def paste(client: Client, text: str) -> httpx.URL:
         res = await client.get("/pastebin")
         assert_status(res, 200)
 
-    res = await client.post("/pastebin", data={"title": word_noise(2**7), "text": text})
+    res = await client.post("/pastebin", data={"title": title, "text": text})
     assert_status(res, 302)
     if res.next_request is None:
         raise MumbleException("No redirect location")

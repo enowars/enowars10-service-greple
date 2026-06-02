@@ -1,5 +1,4 @@
 const Document = @import("Document.zig");
-const Domain = @import("Domain.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
 const Query = @import("Query.zig");
@@ -12,8 +11,11 @@ fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
     var cwd = try Document.openDir();
     defer cwd.close();
 
-    if (query.domain) |d| {
-        const subdir = try cwd.openDir(&std.fmt.bytesToHex(d.hash, .lower), .{});
+    if (query.user_hash) |u| {
+        const subdir = cwd.openDir(&std.fmt.bytesToHex(u, .lower), .{}) catch |err| switch (err) {
+            std.fs.Dir.OpenError.FileNotFound => return alloc.dupe(u8, ""),
+            else => |leftover_err| return leftover_err,
+        };
         cwd.close();
         cwd = subdir;
     }
@@ -30,8 +32,8 @@ fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
 }
 
 const Result = struct {
-    domain: ?Domain,
-    path: ?[]const u8,
+    user_hash: utils.Hash,
+    url: ?[]const u8,
     title: ?[]const u8,
     text: []const u8,
     score: f32,
@@ -46,21 +48,15 @@ const Result = struct {
     }
 };
 
-const Key = struct {
-    domain_hash: utils.Hash,
-    path_hash: utils.Hash,
-};
 const Context = struct {
-    pub fn hash(_: @This(), k: Key) u64 {
-        const d = std.mem.readInt(u32, k.domain_hash[0..4], .little);
-        const p = std.mem.readInt(u32, k.path_hash[0..4], .little);
-        return @as(u64, d) << 32 | p;
+    pub fn hash(_: @This(), k: utils.Hash) u64 {
+        return std.mem.readInt(u64, k[0..8], .little);
     }
-    pub fn eql(_: @This(), a: Key, b: Key) bool {
-        return std.mem.eql(u8, &a.domain_hash, &b.domain_hash) and std.mem.eql(u8, &a.path_hash, &b.path_hash);
+    pub fn eql(_: @This(), a: utils.Hash, b: utils.Hash) bool {
+        return std.mem.eql(u8, &a, &b);
     }
 };
-const HashMap = std.HashMap(Key, Result, Context, std.hash_map.default_max_load_percentage);
+const HashMap = std.HashMap(utils.Hash, Result, Context, std.hash_map.default_max_load_percentage);
 
 fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []const u8) !HashMap {
     var results: HashMap = .init(alloc);
@@ -71,21 +67,18 @@ fn aggregateResults(alloc: std.mem.Allocator, query: *const Query, stdout: []con
 
         var split = std.mem.splitAny(u8, l, ":/");
         std.debug.assert(std.mem.eql(u8, split.next() orelse return error.UnexpectedGrepStdout, "."));
-        const dirname = if (query.domain) |_| null else (split.next() orelse return error.UnexpectedGrepStdout);
+        const dirname = if (query.user_hash) |_| null else (split.next() orelse return error.UnexpectedGrepStdout);
         const filename = split.next() orelse return error.UnexpectedGrepStdout;
         const text = split.rest();
 
-        const key: Key = .{
-            .domain_hash = if (query.domain) |d| d.hash else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?),
-            .path_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename),
-        };
-        const result = try results.getOrPut(key);
+        const url_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
+        const result = try results.getOrPut(url_hash);
         if (result.found_existing) {
             result.value_ptr.addMatch(text);
         } else {
-            result.key_ptr.* = key;
-            result.value_ptr.domain = query.domain;
-            result.value_ptr.path = null;
+            result.key_ptr.* = url_hash;
+            result.value_ptr.user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
+            result.value_ptr.url = null;
             result.value_ptr.title = null;
             result.value_ptr.text = text;
             result.value_ptr.score = 0;
@@ -124,20 +117,16 @@ fn getTop10Results(
             }
         }
 
-        var entry: IndexEntry = try .get(alloc, e.key_ptr.domain_hash, e.key_ptr.path_hash);
+        var entry: IndexEntry = try .get(alloc, e.value_ptr.user_hash, e.key_ptr.*);
         errdefer entry.deinit(alloc);
 
-        var domain: Domain = e.value_ptr.domain orelse try .get(alloc, e.key_ptr.domain_hash);
-        errdefer if (e.value_ptr.domain == null) domain.deinit(alloc);
-
-        if ((if (user) |u| !std.mem.eql(u8, &domain.user_hash, &u.hash) else true) and !entry.public) {
+        const owner_match = if (user) |u| std.mem.eql(u8, &e.value_ptr.user_hash, &u.hash) else false;
+        if (!owner_match and !entry.public) {
             entry.deinit(alloc);
-            if (e.value_ptr.domain == null) domain.deinit(alloc);
             continue;
         }
 
-        e.value_ptr.domain = domain;
-        e.value_ptr.path = entry.path;
+        e.value_ptr.url = entry.url;
         e.value_ptr.title = entry.title;
 
         if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();

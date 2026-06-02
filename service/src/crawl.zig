@@ -1,24 +1,143 @@
 const Document = @import("Document.zig");
-const Domain = @import("Domain.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
 const std = @import("std");
+const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 const path_re = mvzr.compile("(/([a-zA-Z0-9\\-._~]|%[0-9a-fA-F]{2})+)+/?|/").?;
 const title_re = mvzr.compile("<title>.*?</title>").?;
 const p_re = mvzr.compile("<p>.*?</p>").?;
 
+fn setTimeout(fd: std.posix.fd_t, level: i32, optname: u32) !void {
+    try std.posix.setsockopt(fd, level, optname, std.mem.asBytes(&std.posix.timeval{ .sec = 0, .usec = 1e5 }));
+}
+
+fn connect(addr: std.net.Address) !std.net.Stream {
+    const fd = try std.posix.socket(
+        addr.any.family,
+        std.posix.SOCK.STREAM | std.posix.SOCK.CLOEXEC,
+        std.posix.IPPROTO.TCP,
+    );
+    errdefer std.net.Stream.close(.{ .handle = fd });
+
+    try setTimeout(fd, std.posix.IPPROTO.TCP, std.posix.TCP.USER_TIMEOUT);
+    try setTimeout(fd, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO);
+    try setTimeout(fd, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO);
+
+    try std.posix.connect(fd, &addr.any, addr.getOsSockLen());
+
+    return .{ .handle = fd };
+}
+
+fn bytesToU32(bytes: [4]u8) u32 {
+    return std.mem.readInt(u32, &bytes, .big);
+}
+
+fn fetch(
+    alloc: std.mem.Allocator,
+    uri: *const std.Uri,
+    content_type: []const u8,
+) ![]const u8 {
+    const addr = blk: {
+        const list = std.net.getAddressList(alloc, uri.host.?.percent_encoded, uri.port orelse 80) catch return error.DnsResolutionFailed;
+        defer list.deinit();
+        for (list.addrs) |a| {
+            if (a.any.family != std.posix.AF.INET) continue;
+            switch (@as(u8, @truncate(@byteSwap(a.in.sa.addr)))) {
+                0, 255 => continue,
+                else => {},
+            }
+            switch (@byteSwap(a.in.sa.addr)) {
+                bytesToU32(.{ 10, 0, 0, 0 })...bytesToU32(.{ 10, 255, 255, 255 }),
+                bytesToU32(.{ 91, 99, 0, 0 })...bytesToU32(.{ 91, 99, 255, 255 }), // TODO: remove CICD
+                bytesToU32(.{ 172, 18, 0, 1 }), // TODO: remove local testing
+                => {},
+                else => continue,
+            }
+            switch (@byteSwap(a.in.sa.port)) {
+                7777 => {},
+                else => continue,
+            }
+            break :blk a;
+        }
+        return error.DnsResolutionFailed;
+    };
+
+    const stream = try connect(addr);
+    defer stream.close();
+
+    const read_buffer = try alloc.alloc(u8, (std.http.Client{ .allocator = undefined }).read_buffer_size);
+    defer alloc.free(read_buffer);
+
+    const write_buffer = try alloc.alloc(u8, (std.http.Client{ .allocator = undefined }).write_buffer_size);
+    defer alloc.free(write_buffer);
+
+    var connection: std.http.Client.Connection = .{
+        .client = undefined,
+        .stream_writer = stream.writer(write_buffer),
+        .stream_reader = stream.reader(read_buffer),
+        .pool_node = .{},
+        .port = uri.port.?,
+        .host_len = 0,
+        .proxied = false,
+        .closing = false,
+        .protocol = .plain,
+    };
+
+    var request: std.http.Client.Request = .{
+        .uri = uri.*,
+        .client = undefined,
+        .connection = &connection,
+        .reader = .{
+            .in = connection.reader(),
+            .state = .ready,
+            .interface = undefined,
+            .max_head_len = read_buffer.len,
+        },
+        .keep_alive = false,
+        .method = .GET,
+        .transfer_encoding = .none,
+        .redirect_behavior = .not_allowed,
+        .handle_continue = true,
+        .headers = .{},
+        .extra_headers = &.{},
+        .privileged_headers = &.{},
+    };
+    try request.sendBodiless();
+
+    var response = try request.receiveHead(&.{});
+    if (response.head.status != .ok) return error.HttpStatusNotOk;
+    if (response.head.content_type) |c| {
+        if (!std.mem.startsWith(u8, c, content_type)) return error.InvalidContentType;
+    } else return error.InvalidContentType;
+
+    var reader = response.reader(&.{});
+    return reader.allocRemaining(alloc, .unlimited);
+}
+
 pub fn crawl(
     alloc: std.mem.Allocator,
     public: bool,
-    domain: *const Domain,
-    path: []const u8,
+    user: *const User,
+    url: []const u8,
 ) !struct { IndexEntry, Document } {
-    if (!utils.fullMatch(&path_re, path)) return error.InvalidPath;
+    const full_url = try std.mem.concat(alloc, u8, &.{ "http://", url });
+    defer alloc.free(full_url);
 
-    const body = utils.fetch(alloc, domain.ipv4, domain.port, path, "text/html") catch |err| {
-        std.log.info("Indexing failed {f}{s} {}", .{ domain, path, err });
+    const uri = std.Uri.parse(full_url) catch return error.InvalidUrl;
+    std.debug.assert(std.mem.eql(u8, uri.scheme, "http"));
+    if (uri.user != null) return error.InvalidUrl;
+    if (uri.password != null) return error.InvalidUrl;
+    if (uri.host == null) return error.InvalidUrl;
+    std.debug.assert(uri.host.? == .percent_encoded);
+    std.debug.assert(uri.path == .percent_encoded);
+    if (!utils.fullMatch(&path_re, uri.path.percent_encoded)) return error.InvalidUrl;
+    if (uri.query != null) return error.InvalidUrl;
+    if (uri.fragment != null) return error.InvalidUrl;
+
+    const body = fetch(alloc, &uri, "text/html") catch |err| {
+        std.log.info("Indexing failed {s} {}", .{ url, err });
         return error.IndexingFailed;
     };
     defer alloc.free(body);
@@ -43,15 +162,15 @@ pub fn crawl(
     }
     if (text.items.len == 0) return error.IndexingFailed;
 
-    const d_path = try alloc.dupe(u8, path);
-    errdefer alloc.free(d_path);
+    const d_url = try alloc.dupe(u8, url);
+    errdefer alloc.free(d_url);
 
     return .{
         .{
             .public = public,
-            .domain_hash = domain.hash,
-            .path_hash = utils.hash(path),
-            .path = d_path,
+            .user_hash = user.hash,
+            .url_hash = utils.hash(url),
+            .url = d_url,
             .title = d_title,
         },
         .{ .text = try text.toOwnedSlice(alloc) },

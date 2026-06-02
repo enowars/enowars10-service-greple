@@ -1,8 +1,6 @@
-const Domain = @import("Domain.zig");
 const httpz = @import("httpz");
 const search = @import("search.zig");
 const std = @import("std");
-const utils = @import("utils.zig");
 
 const Escape = struct {
     string: []const u8,
@@ -205,17 +203,15 @@ pub const Search = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         for (s.results.results) |r| try w.print(
             \\<p>
-            \\  <a href="http://{f}{f}">{f}</a>
+            \\  <a href="http://{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
-            \\  <small><font color="green">{f}{f}</font></small>
+            \\  <small><font color="green">{f}</font></small>
             \\</p>
         , .{
-            r.domain.?,
-            Escape{ .string = r.path.? },
+            Escape{ .string = r.url.? },
             Escape{ .string = r.title.? },
             Escape{ .string = r.text },
-            Escape{ .string = r.domain.?.domain },
-            Escape{ .string = r.path.? },
+            Escape{ .string = r.url.? },
         });
         if (s.results.filtered > 0) try w.print(
             \\<p style="font-size: small">We have removed {d} results from this
@@ -297,99 +293,36 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
-    domains: []const Domain,
-
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
     }
 
     fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
-            \\<li><a href="#domains">Domains</a></li>
-            \\<li><a href="#register_domain">Register Domain</a></li>
             \\<li><a href="#submit_page">Submit Page</a></li>
             \\<li><a href="#shorten_url">Shorten URL</a></li>
         );
     }
 
-    fn formatDomainsTable(self: *const anyopaque, w: *std.Io.Writer) !void {
-        const s: *const @This() = @ptrCast(@alignCast(self));
-        for (s.domains) |*d| {
-            try w.print(
-                \\<span>{f}</span>
-                \\<span>{f}</span>
-                \\<span>{d}</span>
-            , .{
-                Escape{ .string = d.domain },
-                struct {
-                    domain: *const Domain,
-                    pub fn format(inner_self: *const @This(), inner_w: *std.Io.Writer) !void {
-                        try utils.formatIpv4(inner_self.domain.ipv4, inner_w);
-                    }
-                }{ .domain = d },
-                d.port,
-            });
-        }
-    }
-
-    fn formatDomainsSelect(self: *const anyopaque, w: *std.Io.Writer) !void {
-        const s: *const @This() = @ptrCast(@alignCast(self));
-        for (s.domains) |*d| {
-            try w.print(
-                \\<option value="{s}">{f}</option>
-            , .{
-                std.fmt.bytesToHex(d.hash, .lower),
-                Escape{ .string = d.domain },
-            });
-        }
-    }
-
-    fn formatMain(s: *const anyopaque, w: *std.Io.Writer) !void {
-        try w.print(
-            \\<a name="domains">Domains</a>
-            \\<p>These domains are registered to your user account.</p>
-            \\<div style="display:grid;grid-template-columns:repeat(3,max-content);row-gap:.25rem;column-gap:.5rem">
-            \\  <u>Domain</u>
-            \\  <u>IPv4</u>
-            \\  <u>HTTP-Port</u>
-            \\  {f}
-            \\</div>
-            \\<a name="register_domain">Register Domain</a>
-            \\<p>You can register a domain name with an associated IPv4 address and HTTP port number. Registering a domain allows you to submit pages from the domain to the search index. You need to verify the ownership of the IPv4 through a challenge.</p>
-            \\<form method="POST" class="form">
-            \\  <label for="register_domain_domain">Domain:</label>
-            \\  <input id="register_domain_domain" name="domain" size="32">
-            \\  <label for="register_domain_ipv4">IPv4:</label>
-            \\  <input id="register_domain_ipv4" name="ipv4" size="32">
-            \\  <label for="register_domain_port">Port:</label>
-            \\  <input id="register_domain_port" name="port" type="number" value="80">
-            \\  <input type="submit" name="form_register_domain" value="Register">
-            \\</form>
+    fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll(
             \\<a name="submit_page">Submit Page</a>
-            \\<p>Submit a page to be crawled and added to the search index. If you select public anybody will be able to search for the page, if not only your user account will be able to find the page.</p>
+            \\<p>Submit a page to be crawled and added to the search index. Enter the full URL of the page. If you select public anybody will be able to search for the page, if not only your user account will be able to find the page.</p>
             \\<form method="POST" class="form">
             \\  <label for="submit_page_public">Public:</label>
             \\  <input id="submit_page_public" name="public" type="checkbox" checked>
-            \\  <label for="submit_page_domain">Domain:</label>
-            \\  <select id="submit_page_domain" name="domain">{f}</select>
-            \\  <label for="submit_page_path">Path:</label>
-            \\  <input id="submit_page_path" name="path" size="32" value="/">
+            \\  <label for="submit_page_url">URL:</label>
+            \\  <span>http://<input id="submit_page_url" name="url" size="64"></span>
             \\  <input type="submit" name="form_submit_page" value="Submit">
             \\</form>
             \\<a name="shorten_url">Shorten URL</a>
-            \\<p>Input an path under one of your domains to generate an easy to remember short URL. Be careful anyone with the short URL will be able to access the long URL.</p>
+            \\<p>Input a full URL to generate an easy to remember short URL. Be careful anyone with the short URL will be able to access the long URL.</p>
             \\<form method="POST" class="form">
-            \\  <label for="shorten_url_domain">Domain:</label>
-            \\  <select id="shorten_url_domain" name="domain">{f}</select>
-            \\  <label for="shorten_url_path">Path:</label>
-            \\  <input id="shorten_url_path" name="path" size="32" value="/">
+            \\  <label for="shorten_url_url">URL:</label>
+            \\  <span>http://<input id="shorten_url_url" name="url" size="64"></span>
             \\  <input type="submit" name="form_shorten_url" value="Shorten">
             \\</form>
-        , .{
-            Template{ .self = s, .formatFn = &formatDomainsTable },
-            Template{ .self = s, .formatFn = &formatDomainsSelect },
-            Template{ .self = s, .formatFn = &formatDomainsSelect },
-        });
+        );
     }
 
     fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
@@ -446,7 +379,7 @@ pub const SearchTips = struct {
         try w.writeAll(
             \\<li><a href="#basic">Basic Search</a></li>
             \\<li><a href="#phrase">Multi-word Searches</a></li>
-            \\<li><a href="#site">Site Search</a></li>
+            \\<li><a href="#user">User Search</a></li>
             \\<li><a href="#context">See your search terms in context</a></li>
             \\<li><a href="#stemming">Stemming and Wildcards</a></li>
             \\<li><a href="#case">Does capitalization matter?</a></li>

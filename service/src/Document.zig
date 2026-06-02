@@ -11,15 +11,15 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     var dir = try openDir();
     defer dir.close();
 
-    const dirname = std.fmt.bytesToHex(index_entry.domain_hash, .lower);
+    const dirname = std.fmt.bytesToHex(index_entry.user_hash, .lower);
     dir.makeDir(&dirname) catch |err| switch (err) {
         std.fs.Dir.MakeError.PathAlreadyExists => {},
         else => |leftover_err| return leftover_err,
     };
-    var domain_dir = try dir.openDir(&dirname, .{});
-    defer domain_dir.close();
+    var user_dir = try dir.openDir(&dirname, .{});
+    defer user_dir.close();
 
-    var file = try domain_dir.createFile(&std.fmt.bytesToHex(index_entry.path_hash, .lower), .{});
+    var file = try user_dir.createFile(&std.fmt.bytesToHex(index_entry.url_hash, .lower), .{});
     defer file.close();
 
     var writer = file.writer(&.{});

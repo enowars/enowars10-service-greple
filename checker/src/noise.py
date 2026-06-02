@@ -21,11 +21,6 @@ def printable_noise(entropy: int) -> str:
     return _noise(string.printable, "", entropy)
 
 
-def lower_noise(entropy: int) -> str:
-    """Generate noise consisting of lowercase ASCII letters."""
-    return _noise(string.ascii_lowercase, "", entropy)
-
-
 def alnum_noise(entropy: int) -> str:
     """Generate noise consisting of ASCII letter and digits."""
     return _noise(string.ascii_letters + string.digits, "", entropy)
