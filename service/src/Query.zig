@@ -29,7 +29,7 @@ pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
     while (it.next()) |w| {
         if (w.len == 0) continue;
 
-        if (user_hash == null and std.ascii.eqlIgnoreCase(w, "user") and q[it.index.? - 1] == ':') {
+        if (user_hash == null and std.ascii.eqlIgnoreCase(w, "user") and it.index != null and q[it.index.? - 1] == ':') {
             if (it.peek()) |s| if (s.len > 0) {
                 const username = it.next().?;
                 user_hash = utils.hash(username);
