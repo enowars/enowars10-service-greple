@@ -14,7 +14,7 @@ pub fn hash(data: []const u8) Hash {
 }
 
 pub fn combineHashes(a: Hash, b: Hash) Hash {
-    return (a[0 .. @sizeOf(Hash) / 2] ++ b[@sizeOf(Hash) / 2 ..]).*;
+    return hash(&(a ++ b));
 }
 
 pub fn hmac(data: []const u8) Hmac {
