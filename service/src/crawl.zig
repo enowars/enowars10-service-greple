@@ -2,10 +2,9 @@ const Document = @import("Document.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
 const std = @import("std");
+const Url = @import("Url.zig");
 const User = @import("User.zig");
-const utils = @import("utils.zig");
 
-const path_re = mvzr.compile("(/([a-zA-Z0-9\\-._~]|%[0-9a-fA-F]{2})+)+/?|/").?;
 const title_re = mvzr.compile("<title>.*?</title>").?;
 const p_re = mvzr.compile("<p>.*?</p>").?;
 
@@ -36,26 +35,26 @@ fn bytesToU32(bytes: [4]u8) u32 {
 
 fn fetch(
     alloc: std.mem.Allocator,
-    uri: *const std.Uri,
+    url: *const Url,
     content_type: []const u8,
 ) ![]const u8 {
     const addr = blk: {
-        const list = std.net.getAddressList(alloc, uri.host.?.percent_encoded, uri.port orelse 80) catch return error.DnsResolutionFailed;
+        const list = std.net.getAddressList(alloc, url.host, url.port) catch return error.DnsResolutionFailed;
         defer list.deinit();
         for (list.addrs) |a| {
             if (a.any.family != std.posix.AF.INET) continue;
-            switch (@as(u8, @truncate(@byteSwap(a.in.sa.addr)))) {
+            switch (@as(u8, @truncate(std.mem.bigToNative(u32, a.in.sa.addr)))) {
                 0, 255 => continue,
                 else => {},
             }
-            switch (@byteSwap(a.in.sa.addr)) {
+            switch (std.mem.bigToNative(u32, a.in.sa.addr)) {
                 bytesToU32(.{ 10, 0, 0, 0 })...bytesToU32(.{ 10, 255, 255, 255 }),
                 bytesToU32(.{ 91, 99, 0, 0 })...bytesToU32(.{ 91, 99, 255, 255 }), // TODO: remove CICD
                 bytesToU32(.{ 172, 18, 0, 1 }), // TODO: remove local testing
                 => {},
                 else => continue,
             }
-            switch (@byteSwap(a.in.sa.port)) {
+            switch (a.in.getPort()) {
                 7777 => {},
                 else => continue,
             }
@@ -78,7 +77,7 @@ fn fetch(
         .stream_writer = stream.writer(write_buffer),
         .stream_reader = stream.reader(read_buffer),
         .pool_node = .{},
-        .port = uri.port.?,
+        .port = url.port,
         .host_len = 0,
         .proxied = false,
         .closing = false,
@@ -86,7 +85,7 @@ fn fetch(
     };
 
     var request: std.http.Client.Request = .{
-        .uri = uri.*,
+        .uri = url.toStdUri(),
         .client = undefined,
         .connection = &connection,
         .reader = .{
@@ -118,25 +117,13 @@ fn fetch(
 
 pub fn crawl(
     alloc: std.mem.Allocator,
-    public: bool,
     user: *const User,
+    public: bool,
     url: []const u8,
 ) !struct { IndexEntry, Document } {
-    const full_url = try std.mem.concat(alloc, u8, &.{ "http://", url });
-    defer alloc.free(full_url);
+    const u: Url = try .init(url);
 
-    const uri = std.Uri.parse(full_url) catch return error.InvalidUrl;
-    std.debug.assert(std.mem.eql(u8, uri.scheme, "http"));
-    if (uri.user != null) return error.InvalidUrl;
-    if (uri.password != null) return error.InvalidUrl;
-    if (uri.host == null) return error.InvalidUrl;
-    std.debug.assert(uri.host.? == .percent_encoded);
-    std.debug.assert(uri.path == .percent_encoded);
-    if (!utils.fullMatch(&path_re, uri.path.percent_encoded)) return error.InvalidUrl;
-    if (uri.query != null) return error.InvalidUrl;
-    if (uri.fragment != null) return error.InvalidUrl;
-
-    const body = fetch(alloc, &uri, "text/html") catch |err| {
+    const body = fetch(alloc, &u, "text/html") catch |err| {
         std.log.info("Indexing failed {s} {}", .{ url, err });
         return error.IndexingFailed;
     };
@@ -162,25 +149,14 @@ pub fn crawl(
     }
     if (text.items.len == 0) return error.IndexingFailed;
 
-    const d_url = try alloc.dupe(u8, url);
-    errdefer alloc.free(d_url);
-
     return .{
         .{
             .public = public,
             .user_hash = user.hash,
-            .url_hash = utils.hash(url),
-            .url = d_url,
+            .url_hash = u.hash(),
+            .url = u,
             .title = d_title,
         },
         .{ .text = try text.toOwnedSlice(alloc) },
     };
-}
-
-test "path validation" {
-    try std.testing.expect(utils.fullMatch(&path_re, "/"));
-    try std.testing.expect(utils.fullMatch(&path_re, "/abc"));
-    try std.testing.expect(utils.fullMatch(&path_re, "/abc/"));
-    try std.testing.expect(!utils.fullMatch(&path_re, "/ "));
-    try std.testing.expect(utils.fullMatch(&path_re, "/%20"));
 }

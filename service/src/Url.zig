@@ -1,55 +1,88 @@
-const crawl = @import("crawl.zig");
+const mvzr = @import("mvzr");
 const std = @import("std");
 const utils = @import("utils.zig");
 
-pub const bytes = 64 / 8;
+const path_re = mvzr.compile("(/([a-zA-Z0-9\\-._~]|%[0-9a-fA-F]{2})+)+/?|/").?;
 
-hash: [bytes]u8,
-url: []const u8,
+host: []const u8,
+port: u16,
+path: []const u8,
 
-fn openDir() !std.fs.Dir {
-    return std.fs.cwd().openDir("urls", .{});
-}
+pub const read_buffer_len = @sizeOf(u16);
 
 pub fn init(url: []const u8) !@This() {
-    return .{ .hash = utils.hash(url)[0..bytes].*, .url = url };
-}
+    const uri = std.Uri.parse(url) catch return error.InvalidUrl;
 
-pub fn put(self: *const @This()) !void {
-    if (self.url.len > std.math.maxInt(u16)) return error.UrlTooLong;
+    std.debug.assert(std.mem.eql(u8, uri.scheme, "http"));
 
-    var dir = try openDir();
-    defer dir.close();
+    if (uri.user != null) return error.InvalidUrl;
+    if (uri.password != null) return error.InvalidUrl;
+    if (uri.query != null) return error.InvalidUrl;
+    if (uri.fragment != null) return error.InvalidUrl;
 
-    var file = dir.createFile(&std.fmt.bytesToHex(self.hash, .lower), .{ .exclusive = true }) catch |err| switch (err) {
-        std.fs.File.OpenError.PathAlreadyExists => return,
-        else => |leftover_err| return leftover_err,
-    };
-    defer file.close();
+    if (uri.host == null) return error.InvalidUrl;
+    std.debug.assert(uri.host.? == .percent_encoded);
 
-    var writer = file.writer(&.{});
-
-    try writer.interface.writeInt(u16, @truncate(self.url.len), .little);
-    try writer.interface.writeAll(self.url);
-}
-
-pub fn get(alloc: std.mem.Allocator, hash: [bytes]u8) !@This() {
-    var dir = try openDir();
-    defer dir.close();
-
-    var file = try dir.openFile(&std.fmt.bytesToHex(hash, .lower), .{});
-    defer file.close();
-
-    var buffer: [@max(bytes, @sizeOf(u16))]u8 = undefined;
-    var reader = file.reader(&buffer);
+    std.debug.assert(uri.path == .percent_encoded);
+    if (!utils.fullMatch(&path_re, uri.path.percent_encoded)) return error.InvalidUrl;
 
     return .{
-        .hash = hash,
-        .url = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
+        .host = uri.host.?.percent_encoded,
+        .port = uri.port orelse 80,
+        .path = uri.path.percent_encoded,
     };
+}
+
+pub fn toStdUri(self: *const @This()) std.Uri {
+    return .{
+        .scheme = "http",
+        .host = .{ .percent_encoded = self.host },
+        .port = self.port,
+        .path = .{ .percent_encoded = self.path },
+    };
+}
+
+pub fn format(self: *const @This(), writer: *std.Io.Writer) !void {
+    if (self.port == 80) {
+        try writer.print("http://{s}{s}", .{ self.host, self.path });
+    } else {
+        try writer.print("http://{s}:{d}{s}", .{ self.host, self.port, self.path });
+    }
+}
+
+pub fn write(self: *const @This(), writer: *std.Io.Writer) !void {
+    if (self.host.len > std.math.maxInt(u16)) return error.HostTooLong;
+    if (self.path.len > std.math.maxInt(u16)) return error.PathTooLong;
+
+    try writer.writeInt(u16, @truncate(self.host.len), .little);
+    try writer.writeAll(self.host);
+    try writer.writeInt(u16, self.port, .little);
+    try writer.writeInt(u16, @truncate(self.path.len), .little);
+    try writer.writeAll(self.path);
+}
+
+pub fn read(alloc: std.mem.Allocator, reader: *std.Io.Reader) !@This() {
+    return .{
+        .host = try reader.readAlloc(alloc, try reader.takeInt(u16, .little)),
+        .port = try reader.takeInt(u16, .little),
+        .path = try reader.readAlloc(alloc, try reader.takeInt(u16, .little)),
+    };
+}
+
+pub fn hash(self: *const @This()) utils.Hash {
+    return utils.hash(&(utils.hash(self.host) ++ utils.hash(std.mem.asBytes(&self.port)) ++ utils.hash(self.path)));
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
-    alloc.free(self.url);
+    alloc.free(self.host);
+    alloc.free(self.path);
     self.* = undefined;
+}
+
+test "path validation" {
+    try std.testing.expect(utils.fullMatch(&path_re, "/"));
+    try std.testing.expect(utils.fullMatch(&path_re, "/abc"));
+    try std.testing.expect(utils.fullMatch(&path_re, "/abc/"));
+    try std.testing.expect(!utils.fullMatch(&path_re, "/ "));
+    try std.testing.expect(utils.fullMatch(&path_re, "/%20"));
 }

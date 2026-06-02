@@ -38,6 +38,7 @@ from utils import (
 )
 
 _CHECKER = Enochecker("greple", 7777)
+_FLAG_BASE_URL = "http://example.com/"
 
 
 @_CHECKER.register_dependency
@@ -50,7 +51,7 @@ async def _putflag(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB)
     username = alnum_noise(2**7)
     await register_user(client, username)
 
-    short_url = await shorten_url(client, f"http://example.com/{quote(task.flag)}")
+    short_url = await shorten_url(client, f"{_FLAG_BASE_URL}{quote(task.flag, safe='')}".removeprefix("http://"))
 
     paste_url = await paste(client, word_noise(2**4), short_url)
 
@@ -78,7 +79,7 @@ async def _getflag(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB)
         raise MumbleException("Failed to find short URL")
 
     url = await get_short_url(client, short_url[0])
-    assert_in(quote(task.flag), url, "Flag missing")
+    assert_in(quote(task.flag, safe=""), url, "Flag missing")
 
 
 @_CHECKER.putnoise(0)
@@ -146,7 +147,7 @@ async def _exploit_sca(
     short_url = SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
 
     url = await get_short_url(client, short_url)
-    return unquote(url.removeprefix("http://example.com/"))
+    return unquote(url.removeprefix(_FLAG_BASE_URL))
 
 
 def app() -> fastapi.FastAPI:

@@ -4,6 +4,7 @@ const mvzr = @import("mvzr");
 const Query = @import("Query.zig");
 const SafeSearch = @import("SafeSearch.zig");
 const std = @import("std");
+const Url = @import("Url.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
 
@@ -33,8 +34,8 @@ fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
 
 const Result = struct {
     user_hash: utils.Hash,
-    url: ?[]const u8,
-    title: ?[]const u8,
+    url: Url,
+    title: []const u8,
     text: []const u8,
     score: f32,
 
@@ -90,12 +91,18 @@ fn aggregateResults(
         const user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
         const url_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
 
-        var entry: IndexEntry = try .get(alloc, user_hash, url_hash);
-        errdefer entry.deinit(alloc);
+        const index_entry: IndexEntry = try .get(alloc, user_hash, url_hash);
+        errdefer {
+            alloc.free(index_entry.url.host);
+            alloc.free(index_entry.url.path);
+            alloc.free(index_entry.title);
+        }
 
         const owner_match = if (user.*) |u| std.mem.eql(u8, &user_hash, &u.hash) else false;
-        if (!owner_match and !entry.public) {
-            entry.deinit(alloc);
+        if (!owner_match and !index_entry.public) {
+            alloc.free(index_entry.url.host);
+            alloc.free(index_entry.url.path);
+            alloc.free(index_entry.title);
             continue;
         }
 
@@ -105,8 +112,8 @@ fn aggregateResults(
         } else {
             result.key_ptr.* = url_hash;
             result.value_ptr.user_hash = user_hash;
-            result.value_ptr.url = entry.url;
-            result.value_ptr.title = entry.title;
+            result.value_ptr.url = index_entry.url;
+            result.value_ptr.title = index_entry.title;
             result.value_ptr.text = text;
             result.value_ptr.score = 0;
         }

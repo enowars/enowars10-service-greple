@@ -202,15 +202,15 @@ pub const Search = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         for (s.results.results) |r| try w.print(
             \\<p>
-            \\  <a href="http://{f}">{f}</a>
+            \\  <a href="{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
             \\  <small><font color="green">{f}</font></small>
             \\</p>
         , .{
-            Escape{ .string = r.url.? },
-            Escape{ .string = r.title.? },
+            r.url,
+            Escape{ .string = r.title },
             Escape{ .string = r.text },
-            Escape{ .string = r.url.? },
+            r.url,
         });
     }
 

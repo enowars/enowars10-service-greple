@@ -1,10 +1,11 @@
 const std = @import("std");
+const Url = @import("Url.zig");
 const utils = @import("utils.zig");
 
 public: bool,
 user_hash: utils.Hash,
 url_hash: utils.Hash,
-url: []const u8,
+url: Url,
 title: []const u8,
 
 pub fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
@@ -16,7 +17,6 @@ fn genFilename(user_hash: utils.Hash, url_hash: utils.Hash) [@sizeOf(utils.Hash)
 }
 
 pub fn put(self: *const @This()) !void {
-    if (self.url.len > std.math.maxInt(u16)) return error.UrlTooLong;
     if (self.title.len > std.math.maxInt(u16)) return error.TitleTooLong;
 
     var dir = try openDir(.{});
@@ -28,8 +28,7 @@ pub fn put(self: *const @This()) !void {
     var writer = file.writer(&.{});
 
     try writer.interface.writeByte(@intFromBool(self.public));
-    try writer.interface.writeInt(u16, @truncate(self.url.len), .little);
-    try writer.interface.writeAll(self.url);
+    try self.url.write(&writer.interface);
     try writer.interface.writeInt(u16, @truncate(self.title.len), .little);
     try writer.interface.writeAll(self.title);
 }
@@ -38,26 +37,19 @@ pub fn get(alloc: std.mem.Allocator, user_hash: utils.Hash, url_hash: utils.Hash
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = genFilename(user_hash, url_hash);
-    const file = try dir.openFile(&filename, .{});
+    const file = try dir.openFile(&genFilename(user_hash, url_hash), .{});
     defer file.close();
 
-    var buffer: [@max(1, @sizeOf(utils.Hash), @sizeOf(u16))]u8 = undefined;
+    var buffer: [@max(1, Url.read_buffer_len, @sizeOf(u16))]u8 = undefined;
     var reader = file.reader(&buffer);
 
     return .{
         .public = try reader.interface.takeByte() == @intFromBool(true),
         .user_hash = user_hash,
         .url_hash = url_hash,
-        .url = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
+        .url = try .read(alloc, &reader.interface),
         .title = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
     };
-}
-
-pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
-    alloc.free(self.url);
-    alloc.free(self.title);
-    self.* = undefined;
 }
 
 pub fn getSize() !u32 {

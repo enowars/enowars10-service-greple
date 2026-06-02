@@ -1,14 +1,13 @@
 const crawl = @import("crawl.zig");
-const Document = @import("Document.zig");
 const httpz = @import("httpz");
 const IndexEntry = @import("IndexEntry.zig");
 const Paste = @import("Paste.zig");
 const Query = @import("Query.zig");
 const SafeSearch = @import("SafeSearch.zig");
 const search = @import("search.zig");
+const ShortUrl = @import("ShortUrl.zig");
 const std = @import("std");
 const templates = @import("templates.zig");
-const Url = @import("Url.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
 
@@ -41,14 +40,15 @@ fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
 
 pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
     const safe_err = switch (err) {
+        error.HostTooLong,
         error.InvalidPassword,
         error.InvalidRequest,
         error.InvalidUrl,
         error.InvalidUsername,
         error.MissingUsernameOrPassword,
+        error.PathTooLong,
         error.TextTooLong,
         error.TitleTooLong,
-        error.UrlTooLong,
         => |bad_request_err| blk: {
             res.status = 400;
             break :blk bad_request_err;
@@ -104,8 +104,12 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     };
 
     if (query_params.has("btnI") and results.results.len > 0) {
+        var location: std.Io.Writer.Allocating = .init(res.arena);
+        defer location.deinit();
+        try results.results[0].url.format(&location.writer);
+
         res.status = 302;
-        res.headers.add("Location", try res.arena.dupe(u8, results.results[0].url.?));
+        res.headers.add("Location", try location.toOwnedSlice());
         return;
     }
 
@@ -130,10 +134,14 @@ fn postSearchConsoleSubmitPage(
     const public = data.has("public");
     const url = data.get("url") orelse return error.InvalidRequest;
 
-    var index_entry, var document = try crawl.crawl(res.arena, public, user, url);
+    const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
+    defer res.arena.free(full_url);
+
+    const index_entry, const document = try crawl.crawl(res.arena, user, public, full_url);
     defer {
-        index_entry.deinit(res.arena);
-        document.deinit(res.arena);
+        res.arena.free(index_entry.title);
+        for (document.text) |l| res.arena.free(l);
+        res.arena.free(document.text);
     }
     try index_entry.put();
     try document.put(&index_entry);
@@ -152,15 +160,18 @@ fn postSearchConsoleShortenUrl(
 ) !void {
     const url = data.get("url") orelse return error.InvalidRequest;
 
-    const u: Url = try .init(url);
-    try u.put();
+    const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
+    defer res.arena.free(full_url);
+
+    const short_url: ShortUrl = try .init(full_url);
+    try short_url.put();
 
     var writer: std.Io.Writer.Allocating = .init(res.arena);
     defer writer.deinit();
     try writer.writer.writeAll("http://");
     try writer.writer.writeAll(req.header("host") orelse "[host]");
     try writer.writer.writeAll("/u/");
-    try writer.writer.printHex(&u.hash, .lower);
+    try writer.writer.printHex(&short_url.hash, .lower);
 
     try templates.respond(res, (templates.Message{
         .title = "Search Console: Shortened URL",
@@ -265,11 +276,15 @@ fn postPastebin(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
 fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
     const hash = req.param("hash") orelse return error.InvalidRequest;
 
-    var url: Url = try .get(req.arena, try utils.hexToBytes(Url.bytes, hash));
-    defer url.deinit(res.arena);
+    var short_url: ShortUrl = try .get(req.arena, try utils.hexToBytes(ShortUrl.bytes, hash));
+    defer short_url.deinit(res.arena);
+
+    var location: std.Io.Writer.Allocating = .init(res.arena);
+    defer location.deinit();
+    try short_url.url.format(&location.writer);
 
     res.status = 302;
-    res.headers.add("Location", try std.mem.concat(res.arena, u8, &.{ "http://", url.url }));
+    res.headers.add("Location", try location.toOwnedSlice());
 }
 
 fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
