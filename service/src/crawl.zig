@@ -39,7 +39,7 @@ fn fetch(
     content_type: []const u8,
 ) ![]const u8 {
     const addr = blk: {
-        const list = std.net.getAddressList(alloc, url.host, url.port) catch return error.DnsResolutionFailed;
+        const list = try std.net.getAddressList(alloc, url.host, url.port);
         defer list.deinit();
         for (list.addrs) |a| {
             if (a.any.family != std.posix.AF.INET) continue;
@@ -60,7 +60,7 @@ fn fetch(
             }
             break :blk a;
         }
-        return error.DnsResolutionFailed;
+        return error.NoValidAddressFound;
     };
 
     const stream = try connect(addr);
