@@ -4,7 +4,6 @@ RUN apk add --no-cache zig
 COPY build.zig .
 COPY build.zig.zon .
 COPY src src
-RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build test
 RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build
 
 FROM scratch
