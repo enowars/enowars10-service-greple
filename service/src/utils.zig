@@ -1,7 +1,7 @@
 const mvzr = @import("mvzr");
 const std = @import("std");
 
-const key = "change me"; // TODO: change secret
+const key = @embedFile("secret.bin");
 const HashFn = std.crypto.hash.sha2.Sha224;
 const HmacFn = std.crypto.auth.hmac.Hmac(HashFn);
 pub const Hash = [HashFn.digest_length]u8;

@@ -1,6 +1,8 @@
 FROM alpine:3.23
 WORKDIR /greple
 RUN apk add --no-cache zig
+RUN mkdir src
+RUN head -c64 /dev/urandom > src/secret.bin
 COPY build.zig .
 COPY build.zig.zon .
 COPY src src
