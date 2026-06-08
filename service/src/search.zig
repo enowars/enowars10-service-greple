@@ -59,7 +59,7 @@ const HashMap = std.HashMap(utils.Hash, Result, struct {
 }, std.hash_map.default_max_load_percentage);
 
 // TODO: add test in checker to ensure allowed complexity isn't reduced
-const Regex = mvzr.SizedRegex(42, 2);
+const Regex = mvzr.SizedRegex(64, 2);
 
 fn aggregateResults(
     alloc: std.mem.Allocator,

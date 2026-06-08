@@ -12,7 +12,7 @@ from enochecker3 import MumbleException
 from enochecker3.utils import assert_equals, assert_in, caller_loc
 
 from client import Client
-from noise import printable_noise, word_noise
+from noise import printable_noise
 
 
 def re_escape(s: str) -> str:
@@ -55,14 +55,7 @@ async def register_user(client: Client, username: str) -> None:
     """Register a user with username."""
     await _get_preferences(client)
 
-    res = await client.post(
-        "/preferences",
-        data={
-            "username": username,
-            "password": printable_noise(2**7),
-            "form_user_account": "Login",
-        },
-    )
+    res = await client.post("/user_account", data={"username": username, "password": printable_noise(2**7)})
     assert_status(res, 302)
     if res.next_request is None:
         raise MumbleException("No redirect location")
@@ -84,14 +77,7 @@ async def set_safe_search(client: Client, enabled: bool, regex: str) -> None:
     """Set safe search preferences."""
     await _get_preferences(client)
 
-    res = await client.post(
-        "/preferences",
-        data={
-            **({"enabled": "on"} if enabled else {}),
-            "regex": regex,
-            "form_safe_search": "Save",
-        },
-    )
+    res = await client.post("/safe_search", data={**({"enabled": "on"} if enabled else {}), "regex": regex})
     assert_status(res, 302)
     if res.next_request is None:
         raise MumbleException("No redirect location")
@@ -124,14 +110,7 @@ async def submit_page(client: Client, public: bool, url: str) -> None:
     """Submit a page."""
     await _get_console(client)
 
-    res = await client.post(
-        "/console",
-        data={
-            **({"public": "on"} if public else {}),
-            "url": url,
-            "form_submit_page": "Submit",
-        },
-    )
+    res = await client.post("/submit_page", data={**({"public": "on"} if public else {}), "url": url})
     assert_status(res, 200)
     assert_in("page has been submitted", res.text, "Unexpected result text")
 
@@ -140,7 +119,7 @@ async def shorten_url(client: Client, url: str) -> str:
     """Shorten a URL returning short URL."""
     await _get_console(client)
 
-    res = await client.post("/console", data={"url": url, "form_shorten_url": "Shorten"})
+    res = await client.post("/shorten_url", data={"url": url})
     assert_status(res, 200)
     short_url = re.search(SHORT_URL_REGEX, res.text)
     if not short_url:
@@ -177,14 +156,16 @@ async def search(client: Client, q: str) -> str:
         res = await client.get("/")
         assert_status(res, 200)
         assert_in("Greple Search", res.text, "Missing search button")
-        assert_in('src="/static/logo.gif"', res.text, "Missing logo")
+        assert_in('src="/logo.gif"', res.text, "Missing logo")
 
-    query = urlencode({"q": q, "btnG": "Greple Search"})
+    query = urlencode({"q": q})
     res = await client.get(f"/search?{query}")
     assert_status(res, 200)
     assert_in(f'value="{escape(q)}"', res.text, "Unexpected form value")
-    if not re.search(r"\b[0-9]\.[0-9]{3}\b", res.text):
+    if not re.search(r"\b[0-9]\.[0-9]{2}\b", res.text):
         raise MumbleException("Missing query timing information")
+    if not re.search(r'title="(\d+(?:\.\d+)?) ms"', res.text):
+        raise MumbleException("Missing detailed query timing information")
     if not re.search(r"of( about)? <b>(0|[1-9][0-9]*)</b>\.", res.text):
         raise MumbleException("Missing result count number")
 

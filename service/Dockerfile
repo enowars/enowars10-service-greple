@@ -6,7 +6,7 @@ RUN head -c64 /dev/urandom > src/secret.bin
 COPY build.zig .
 COPY build.zig.zon .
 COPY src src
-RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build
+RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build -Doptimize=ReleaseSafe
 
 FROM scratch
 WORKDIR /data

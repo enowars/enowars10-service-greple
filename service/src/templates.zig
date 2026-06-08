@@ -73,13 +73,13 @@ pub const Index = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; max-width: 80rem">
-            \\  <img width="300" height="117" src="/static/logo.gif" border="0" alt="Greple">
+            \\  <img width="300" height="117" src="/logo.gif" border="0" alt="Greple">
             \\  <small>Search {d} web pages</small>
             \\  <form action="/search" method="GET" style="display: flex; gap: .5rem; flex-direction: column; width: fit-content">
             \\    <input type="text" value="" name="q" size="50">
             \\    <div style="display: flex; gap: .25rem; justify-content: center">
-            \\      <input name="btnG" type="submit" value="Greple Search">
-            \\      <input name="btnI" type="submit" value="I'm Feeling Lucky">
+            \\      <input type="submit" value="Greple Search">
+            \\      <input name="lucky" type="submit" value="I'm Feeling Lucky">
             \\    </div>
             \\  </form>
             \\</div>
@@ -131,7 +131,7 @@ const Columns = struct {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.print(
             \\<div style="display:grid;grid-template:5rem auto/12.5rem 67rem;gap:.5rem;align-items:center">
-            \\  <a href="/"><img src="/static/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
+            \\  <a href="/"><img src="/logo.gif" border="0" width="200" height="78" alt="Greple"></a>
             \\  {f}
             \\  <div style="font-size:small;align-self:start;margin-top:1rem;margin-left:.5rem">
             \\    <nav style="display:flex;flex-direction:column;gap:.5rem;align-items:start">
@@ -180,12 +180,12 @@ pub const Search = struct {
             \\<div style="display:flex;flex-direction:column;gap:.75rem">
             \\  <form action="/search" style="display:flex;gap:.25rem">
             \\    <input type="text" name="q" size="32" value="{f}">
-            \\    <input type="submit" name="btnG" value="Greple Search">
-            \\    <input type="submit" name="btnI" value="I'm Feeling Lucky"><br>
+            \\    <input type="submit" value="Greple Search">
+            \\    <input type="submit" name="lucky" value="I'm Feeling Lucky"><br>
             \\  </form>
             \\  <div style="padding:2pt;color:white;background:#3366cc;display:flex;justify-content:space-between">
             \\    <small>Searched the web for <b>{f}</b>.</small>
-            \\    <small>Results <b>{d} - {d}</b> of <b>{d}</b>. Search took <b>{d:.3}</b> seconds.</small>
+            \\    <small>Results <b>{d} - {d}</b> of <b>{d}</b>. Search took <b title="{d} ms">{d:.2}</b> seconds.</small>
             \\  </div>
             \\</div>
         , .{
@@ -194,6 +194,7 @@ pub const Search = struct {
             @min(s.results.results.len, 1),
             s.results.results.len,
             s.results.total,
+            @as(f32, @floatFromInt(s.results.time)) / 1e6,
             @as(f32, @floatFromInt(s.results.time)) / 1e9,
         });
     }
@@ -248,21 +249,21 @@ pub const Preferences = struct {
         try w.print(
             \\<a name="user_account">User Account</a>
             \\<p>Login into a Greple account to access the search console. If you don't have an account, use the same form to register.</p>
-            \\<form method="POST" class="form">
+            \\<form action="/user_account" method="POST" class="form">
             \\  <label for="user_account_username">Username:</label>
             \\  <input id="user_account_username" name="username" size="32" value="{f}">
             \\  <label for="user_account_password">Password:</label>
             \\  <input id="user_account_password" name="password" size="32" type="password">
-            \\  <input type="submit" name="form_user_account" value="Login">
+            \\  <input type="submit" value="Login">
             \\</form>
             \\<a name="safe_search">Safe Search</a>
             \\<p>Filter out search results matching a defined regular expression.</p>
-            \\<form method="POST" class="form">
+            \\<form action="/safe_search" method="POST" class="form">
             \\  <label for="safe_search_enabled">Enabled:</label>
             \\  <input id="safe_search_enabled" name="enabled" type="checkbox"{s}>
             \\  <label for="safe_search_regex">Regex:</label>
             \\  <input id="safe_search_regex" name="regex" size="32" value="{f}">
-            \\  <input type="submit" name="form_safe_search" value="Save">
+            \\  <input type="submit" value="Save">
             \\</form>
         , .{
             Escape{ .string = if (s.user) |u| u.username else "" },
@@ -301,19 +302,19 @@ pub const SearchConsole = struct {
         try w.writeAll(
             \\<a name="submit_page">Submit Page</a>
             \\<p>Submit a page to be crawled and added to the search index. Enter the full URL of the page. If you select public anybody will be able to search for the page, if not only your user account will be able to find the page.</p>
-            \\<form method="POST" class="form">
+            \\<form action="/submit_page" method="POST" class="form">
             \\  <label for="submit_page_public">Public:</label>
             \\  <input id="submit_page_public" name="public" type="checkbox" checked>
             \\  <label for="submit_page_url">URL:</label>
             \\  <span>http://<input id="submit_page_url" name="url" size="64"></span>
-            \\  <input type="submit" name="form_submit_page" value="Submit">
+            \\  <input type="submit" value="Submit">
             \\</form>
             \\<a name="shorten_url">Shorten URL</a>
             \\<p>Input a full URL to generate an easy to remember short URL. Be careful anyone with the short URL will be able to access the long URL.</p>
-            \\<form method="POST" class="form">
+            \\<form action="/shorten_url" method="POST" class="form">
             \\  <label for="shorten_url_url">URL:</label>
             \\  <span>http://<input id="shorten_url_url" name="url" size="64"></span>
-            \\  <input type="submit" name="form_shorten_url" value="Shorten">
+            \\  <input type="submit" value="Shorten">
             \\</form>
         );
     }

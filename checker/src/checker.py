@@ -1,6 +1,5 @@
 """Checker for greple service."""
 
-import asyncio
 import logging
 import random
 import re
@@ -115,7 +114,7 @@ async def _get_public_document(client: Client, db: ChainDB) -> None:
     assert_in(text, body, "Public document not returned as result")
     assert_in("of <b>1</b>.", body, "Unexpected result count")
 
-    query = urlencode({"q": text, "btnI": "I'm Feeling Lucky"})
+    query = urlencode({"q": text, "lucky": "I'm Feeling Lucky"})
     res = await client.get(f"/search?{query}")
     assert_status(res, 302)
     if not res.next_request:
@@ -141,12 +140,13 @@ async def _exploit_sca(
     if task.attack_info is None:
         raise MumbleException("Missing attack info")
 
-    cal = await calibrate_redos(logger, client, asyncio.Semaphore(2))
+    cal = await calibrate_redos(logger, client)
 
-    aws = (exploit_sca_letter(logger, client, cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH))
-    short_url = SHORT_URL_PREFIX + "".join(await asyncio.gather(*aws))
+    short_url = "".join(
+        [await exploit_sca_letter(logger, client, cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH)],
+    )
 
-    url = await get_short_url(client, short_url)
+    url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
     return unquote(url.removeprefix(_FLAG_BASE_URL))
 
 

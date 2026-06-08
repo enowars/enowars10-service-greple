@@ -103,7 +103,7 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
         break :blk try search.performSearch(res.arena, &user, &safe_search, &query);
     };
 
-    if (query_params.has("btnI") and results.results.len > 0) {
+    if (query_params.has("lucky") and results.results.len > 0) {
         var location: std.Io.Writer.Allocating = .init(res.arena);
         defer location.deinit();
         try results.results[0].url.format(&location.writer);
@@ -119,74 +119,64 @@ fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     }).interface());
 }
 
-fn getSearchConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    if (try User.parse(req)) |_| {
-        return templates.respond(res, (templates.SearchConsole{}).interface());
-    }
+fn getConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+    if (try User.parse(req)) |_| return templates.respond(res, (templates.SearchConsole{}).interface());
     return error.AccessDenied;
 }
 
-fn postSearchConsoleSubmitPage(
-    res: *httpz.Response,
-    user: *const User,
-    data: *const httpz.key_value.StringKeyValue,
-) !void {
-    const public = data.has("public");
-    const url = data.get("url") orelse return error.InvalidRequest;
-
-    const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
-    defer res.arena.free(full_url);
-
-    const index_entry, const document = try crawl.crawl(res.arena, user, public, full_url);
-    defer {
-        res.arena.free(index_entry.title);
-        for (document.text) |l| res.arena.free(l);
-        res.arena.free(document.text);
-    }
-    try index_entry.put();
-    try document.put(&index_entry);
-
-    try templates.respond(res, (templates.Message{
-        .title = "Search Console: Submitted Page",
-        .message = "The page has been submitted to the index.",
-        .is_error = false,
-    }).interface());
-}
-
-fn postSearchConsoleShortenUrl(
-    req: *const httpz.Request,
-    res: *httpz.Response,
-    data: *const httpz.key_value.StringKeyValue,
-) !void {
-    const url = data.get("url") orelse return error.InvalidRequest;
-
-    const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
-    defer res.arena.free(full_url);
-
-    const short_url: ShortUrl = try .init(full_url);
-    try short_url.put();
-
-    var writer: std.Io.Writer.Allocating = .init(res.arena);
-    defer writer.deinit();
-    try writer.writer.writeAll("http://");
-    try writer.writer.writeAll(req.header("host") orelse "[host]");
-    try writer.writer.writeAll("/u/");
-    try writer.writer.printHex(&short_url.hash, .lower);
-
-    try templates.respond(res, (templates.Message{
-        .title = "Search Console: Shortened URL",
-        .message = try writer.toOwnedSlice(),
-        .is_error = false,
-    }).interface());
-}
-
-fn postSearchConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+fn postSubmitPage(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     if (try User.parse(req)) |*u| {
         const data = try req.formData();
-        if (data.has("form_submit_page")) return postSearchConsoleSubmitPage(res, u, data);
-        if (data.has("form_shorten_url")) return postSearchConsoleShortenUrl(req, res, data);
-        return error.InvalidRequest;
+        const public = data.has("public");
+        const url = data.get("url") orelse return error.InvalidRequest;
+
+        const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
+        defer res.arena.free(full_url);
+
+        const index_entry, const document = try crawl.crawl(res.arena, u, public, full_url);
+        defer {
+            res.arena.free(index_entry.title);
+            for (document.text) |l| res.arena.free(l);
+            res.arena.free(document.text);
+        }
+        try index_entry.put();
+        try document.put(&index_entry);
+
+        return templates.respond(res, (templates.Message{
+            .title = "Search Console: Submitted Page",
+            .message = "The page has been submitted to the index.",
+            .is_error = false,
+        }).interface());
     }
+
+    return error.AccessDenied;
+}
+
+fn postShortenUrl(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+    if (try User.parse(req)) |_| {
+        const data = try req.formData();
+        const url = data.get("url") orelse return error.InvalidRequest;
+
+        const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
+        defer res.arena.free(full_url);
+
+        const short_url: ShortUrl = try .init(full_url);
+        try short_url.put();
+
+        var message: std.Io.Writer.Allocating = .init(res.arena);
+        defer message.deinit();
+        try message.writer.writeAll("http://");
+        try message.writer.writeAll(req.header("host") orelse "[host]");
+        try message.writer.writeAll("/u/");
+        try message.writer.printHex(&short_url.hash, .lower);
+
+        return templates.respond(res, (templates.Message{
+            .title = "Search Console: Shortened URL",
+            .message = try message.toOwnedSlice(),
+            .is_error = false,
+        }).interface());
+    }
+
     return error.AccessDenied;
 }
 
@@ -203,53 +193,40 @@ fn cookieValidChar(char: u8) bool {
     };
 }
 
-fn postPreferencesUserAccount(
-    req: *const httpz.Request,
-    res: *httpz.Response,
-    data: *const httpz.key_value.StringKeyValue,
-) !void {
+fn postUserAccount(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+    const data = try req.formData();
     const username = data.get("username") orelse return error.InvalidRequest;
     const password = data.get("password") orelse return error.InvalidRequest;
     if (username.len == 0 or password.len == 0) return error.MissingUsernameOrPassword;
 
     const user: User = try .login(username, password);
 
-    var cookie: std.Io.Writer.Allocating = .init(res.arena);
-    defer cookie.deinit();
-    try cookie.writer.writeAll("username=");
-    try std.Uri.Component.percentEncode(&cookie.writer, user.username, cookieValidChar);
-    try cookie.writer.writeAll("&hmac=");
-    try cookie.writer.printHex(&user.hmac, .lower);
+    var value: std.Io.Writer.Allocating = .init(res.arena);
+    defer value.deinit();
+    try value.writer.writeAll("username=");
+    try std.Uri.Component.percentEncode(&value.writer, user.username, cookieValidChar);
+    try value.writer.writeAll("&hmac=");
+    try value.writer.printHex(&user.hmac, .lower);
 
     res.status = 302;
-    res.headers.add("Location", req.url.path);
-    try res.setCookie("user_account", try cookie.toOwnedSlice(), cookie_opts);
+    res.headers.add("Location", "/preferences");
+    try res.setCookie("user_account", try value.toOwnedSlice(), cookie_opts);
 }
 
-fn postPreferencesSafeSearch(
-    req: *const httpz.Request,
-    res: *httpz.Response,
-    data: *const httpz.key_value.StringKeyValue,
-) !void {
+fn postSafeSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
+    const data = try req.formData();
     const enabled = data.has("enabled");
     const regex = data.get("regex") orelse return error.InvalidRequest;
 
-    var cookie: std.Io.Writer.Allocating = .init(res.arena);
-    defer cookie.deinit();
-    if (enabled) try cookie.writer.writeAll("enabled=on&");
-    try cookie.writer.writeAll("regex=");
-    try std.Uri.Component.percentEncode(&cookie.writer, regex, cookieValidChar);
+    var value: std.Io.Writer.Allocating = .init(res.arena);
+    defer value.deinit();
+    if (enabled) try value.writer.writeAll("enabled=on&");
+    try value.writer.writeAll("regex=");
+    try std.Uri.Component.percentEncode(&value.writer, regex, cookieValidChar);
 
     res.status = 302;
-    res.headers.add("Location", req.url.path);
-    try res.setCookie("safe_search", try cookie.toOwnedSlice(), cookie_opts);
-}
-
-fn postPreferences(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    const data = try req.formData();
-    if (data.has("form_user_account")) return postPreferencesUserAccount(req, res, data);
-    if (data.has("form_safe_search")) return postPreferencesSafeSearch(req, res, data);
-    return error.InvalidRequest;
+    res.headers.add("Location", "/preferences");
+    try res.setCookie("safe_search", try value.toOwnedSlice(), cookie_opts);
 }
 
 fn getPastebin(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
@@ -265,12 +242,12 @@ fn postPastebin(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
     const paste: Paste = .init(title, text);
     try paste.put();
 
-    var writer: std.Io.Writer.Allocating = .init(res.arena);
-    defer writer.deinit();
-    try writer.writer.print("/p/{s}", .{std.fmt.bytesToHex(paste.hash, .lower)});
+    var location: std.Io.Writer.Allocating = .init(res.arena);
+    defer location.deinit();
+    try location.writer.print("/p/{s}", .{std.fmt.bytesToHex(paste.hash, .lower)});
 
     res.status = 302;
-    res.headers.add("Location", try writer.toOwnedSlice());
+    res.headers.add("Location", try location.toOwnedSlice());
 }
 
 fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
@@ -339,16 +316,18 @@ pub fn main() !void {
     var router = try server.router(.{});
     router.get("/", getIndex, .{});
     router.get("/search", getSearch, .{});
-    router.get("/console", getSearchConsole, .{});
-    router.post("/console", postSearchConsole, .{});
+    router.get("/console", getConsole, .{});
+    router.post("/submit_page", postSubmitPage, .{});
+    router.post("/shorten_url", postShortenUrl, .{});
     router.get("/preferences", getPreferences, .{});
-    router.post("/preferences", postPreferences, .{});
+    router.post("/user_account", postUserAccount, .{});
+    router.post("/safe_search", postSafeSearch, .{});
     router.get("/pastebin", getPastebin, .{});
     router.post("/pastebin", postPastebin, .{});
     router.get("/u/:hash", getUrl, .{});
     router.get("/p/:hash", getPaste, .{});
     router.get("/help", getHelp, .{});
-    router.get("/static/logo.gif", getLogoGif, .{});
+    router.get("/logo.gif", getLogoGif, .{});
 
     server_instance = &server;
     try server.listen();

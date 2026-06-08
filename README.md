@@ -21,27 +21,26 @@ Greple is a web search engine that allows users to:
 
 ## Endpoints
 
-| Method | Endpoint | Form Field | Description |
-|--------|----------|------------|-------------|
-| `GET` | `/` | N/A | Search homepage |
-| `GET` | `/search` | N/A | Perform search queries (params: `q`, `btnI`) |
-| `GET` | `/help` | N/A | Search tips and documentation |
-| `GET` | `/u/:hash` | N/A | URL shortener redirect |
-| `GET` | `/p/:hash` | N/A | Pastebin document |
-| `GET` | `/static/logo.gif` | N/A | Logo image |
-| `GET` | `/preferences` | N/A | View current preferences |
-| `POST` | `/preferences` | `form_user_account` | Login / Register user |
-| `POST` | `/preferences` | `form_safe_search` | Configure safe search |
-| `GET` | `/console` | N/A | View registered domains |
-| `POST` | `/console` | `form_register_domain` | Register a new domain |
-| `POST` | `/console` | `form_submit_page` | Submit a page for indexing |
-| `POST` | `/console` | `form_shorten_url` | Generate short URL |
-| `GET` | `/pastebin` | N/A | View form for pastebin |
-| `POST` | `/pastebin` | N/A | Submit pastebin document |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Search homepage |
+| `GET` | `/search` | Perform search queries (params: `q`, `btnI`) |
+| `GET` | `/help` | Search tips and documentation |
+| `GET` | `/u/:hash` | URL shortener redirect |
+| `GET` | `/p/:hash` | Pastebin document |
+| `GET` | `/static/logo.gif` | Logo image |
+| `GET` | `/preferences` | View current preferences |
+| `POST` | `/user_account` | Login / Register user |
+| `POST` | `/safe_search` | Configure safe search |
+| `GET` | `/console` | View registered domains |
+| `POST` | `/submit_page` | Submit a page for indexing |
+| `POST` | `/shorten_url` | Generate short URL |
+| `GET` | `/pastebin` | View form for pastebin |
+| `POST` | `/pastebin` | Submit pastebin document |
 
 ## Flagstore 0
 
-The checker first registers an user and a domain. The flag is stored through the shorten URL endpoint as the percent encoded path of the long URL. The shortened URL is the added as part of the text of a search index entry for the path `/`.
+The checker first registers an user and a domain. The flag is stored through the shorten URL endpoint as the percent encoded path of the long URL. The shortened URL is the added as a paste using the pastebin feature. The paste is then submitted to the search index as a private entry. The username is the attack info.
 
 The flagstore can be exploited through [ReDoS](https://en.wikipedia.org/wiki/ReDoS) + Timing Side-Channel.
 
