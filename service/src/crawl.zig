@@ -55,7 +55,7 @@ fn fetch(
                 else => continue,
             }
             switch (a.in.getPort()) {
-                7777 => {},
+                1024...9999 => {},
                 else => continue,
             }
             break :blk a;
@@ -124,7 +124,7 @@ pub fn crawl(
     const u: Url = try .init(url);
 
     const body = fetch(alloc, &u, "text/html") catch |err| {
-        std.log.info("Indexing failed {s} {}", .{ url, err });
+        std.log.warn("Indexing failed {s} {}", .{ url, err });
         return error.IndexingFailed;
     };
     defer alloc.free(body);
