@@ -307,6 +307,7 @@ pub fn main() !void {
     var server: httpz.Server(@This()) = try .init(allocator, .{
         .address = .all(7777),
         .request = .{ .max_form_count = 6 },
+        .workers = .{ .count = 1 },
     }, .{});
     defer {
         server.stop();
