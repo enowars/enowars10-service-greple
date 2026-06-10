@@ -1,6 +1,6 @@
-const httpz = @import("httpz");
 const search = @import("search.zig");
 const std = @import("std");
+const zap = @import("zap");
 
 const Escape = struct {
     string: []const u8,
@@ -230,8 +230,8 @@ pub const Search = struct {
 };
 
 pub const Preferences = struct {
-    user: ?@import("User.zig"),
-    safe_search: @import("SafeSearch.zig"),
+    user: *const ?@import("User.zig"),
+    safe_search: *const ?@import("SafeSearch.zig"),
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Preferences");
@@ -266,9 +266,9 @@ pub const Preferences = struct {
             \\  <input type="submit" value="Save">
             \\</form>
         , .{
-            Escape{ .string = if (s.user) |u| u.username else "" },
-            if (s.safe_search.enabled) " checked" else "",
-            Escape{ .string = s.safe_search.regex },
+            Escape{ .string = if (s.user.*) |*u| u.username else "" },
+            if (if (s.safe_search.*) |*ss| ss.enabled else false) " checked" else "",
+            Escape{ .string = if (s.safe_search.*) |ss| ss.regex else "xxx" },
         });
     }
 
@@ -462,7 +462,10 @@ pub const Paste = struct {
     }
 };
 
-pub fn respond(res: *httpz.Response, template: Template) !void {
-    res.content_type = .HTML;
-    try template.format(res.writer());
+pub fn respond(alloc: std.mem.Allocator, req: *const zap.Request, template: Template) !void {
+    var body: std.Io.Writer.Allocating = .init(alloc);
+    defer body.deinit();
+    try template.format(&body.writer);
+    try req.setContentType(.HTML);
+    try req.sendBody(body.written());
 }

@@ -4,23 +4,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const httpz = b.dependency("httpz", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("httpz");
-
     const mvzr = b.dependency("mvzr", .{
         .target = target,
         .optimize = optimize,
     }).module("mvzr");
+
+    const zap = b.dependency("zap", .{
+        .target = target,
+        .optimize = optimize,
+        .openssl = false,
+    }).module("zap");
 
     const greple = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "httpz", .module = httpz },
             .{ .name = "mvzr", .module = mvzr },
+            .{ .name = "zap", .module = zap },
         },
     });
 

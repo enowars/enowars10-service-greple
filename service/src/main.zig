@@ -1,5 +1,4 @@
 const crawl = @import("crawl.zig");
-const httpz = @import("httpz");
 const IndexEntry = @import("IndexEntry.zig");
 const Paste = @import("Paste.zig");
 const Query = @import("Query.zig");
@@ -10,180 +9,164 @@ const std = @import("std");
 const templates = @import("templates.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
+const zap = @import("zap");
 
-pub const std_options: std.Options = .{ .http_disable_tls = true };
-
-const cookie_opts: httpz.response.CookieOpts = .{
-    .http_only = true,
-    .same_site = .strict,
+pub const std_options: std.Options = .{
+    .log_level = .info,
+    .http_disable_tls = true,
 };
 
-var server_instance: ?*httpz.Server(@This()) = null;
-
-fn shutdown(_: i32) callconv(.c) noreturn {
-    if (server_instance) |server| {
-        server_instance = null;
-        server.stop();
-    }
-    std.posix.exit(0);
-}
-
-fn errorMessage(alloc: std.mem.Allocator, err: anyerror) ![]const u8 {
-    var writer: std.Io.Writer.Allocating = .init(alloc);
-    defer writer.deinit();
-    for (@errorName(err)) |c| {
-        if (std.ascii.isUpper(c)) try writer.writer.writeByte(' ');
-        try writer.writer.writeByte(c);
-    }
-    return writer.toOwnedSlice();
-}
-
-pub fn uncaughtError(_: @This(), req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
-    const safe_err = switch (err) {
-        error.HostTooLong,
-        error.InvalidPassword,
-        error.InvalidRequest,
-        error.InvalidUrl,
-        error.InvalidUsername,
-        error.MissingUsernameOrPassword,
-        error.PathTooLong,
-        error.TextTooLong,
-        error.TitleTooLong,
-        => |bad_request_err| blk: {
-            res.status = 400;
-            break :blk bad_request_err;
-        },
-        error.AccessDenied,
-        error.InvalidCredentials,
-        => |forbidden_err| blk: {
-            res.status = 403;
-            break :blk forbidden_err;
-        },
-        error.DnsResolutionFailed,
-        error.IndexingFailed,
-        => |internal_err| blk: {
-            res.status = 500;
-            break :blk internal_err;
-        },
-        else => blk: {
-            res.status = 500;
-            break :blk error.InternalServerError;
-        },
-    };
-    std.log.info("{d} {} {s} {}", .{ res.status, req.method, req.url.path, err });
-    const message = errorMessage(res.arena, safe_err) catch "Internal Server Error";
-    templates.respond(res, (templates.Message{
-        .title = "Error",
-        .message = message,
-        .is_error = true,
-    }).interface()) catch {
-        res.body = message;
-    };
-}
-
-fn getIndex(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.Index{
+fn getIndex(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try templates.respond(alloc, req, (templates.Index{
         .index_size = try IndexEntry.getSize(),
     }).interface());
 }
 
-fn getSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    const user = try User.parse(req);
-    const safe_search = try SafeSearch.parse(req);
+fn getSearch(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    req.parseQuery();
+    req.parseCookies(false);
 
-    const query_params = try req.query();
-    const q = query_params.get("q") orelse "";
+    var user = try User.parse(alloc, req);
+    defer if (user) |*u| u.deinit(alloc);
+
+    var safe_search = try SafeSearch.parse(alloc, req);
+    defer if (safe_search) |*ss| ss.deinit(alloc);
+
+    const q = try req.getParamStr(alloc, "q") orelse return error.InvalidRequest;
+    defer alloc.free(q);
 
     var results = blk: {
-        const query = try Query.init(res.arena, q) orelse break :blk search.Results{
+        const query = try Query.init(alloc, q) orelse break :blk search.Results{
             .results = &.{},
             .time = 0,
             .total = 0,
         };
-        break :blk try search.performSearch(res.arena, &user, &safe_search, &query);
+        break :blk try search.performSearch(alloc, &user, &safe_search, &query);
     };
 
-    if (query_params.has("lucky") and results.results.len > 0) {
-        var location: std.Io.Writer.Allocating = .init(res.arena);
+    if (req.getParamSlice("lucky")) |_| if (results.results.len > 0) {
+        var location: std.Io.Writer.Allocating = .init(alloc);
         defer location.deinit();
         try results.results[0].url.format(&location.writer);
 
-        res.status = 302;
-        res.headers.add("Location", try location.toOwnedSlice());
-        return;
-    }
+        req.setStatus(.found);
+        try req.setHeader("Location", location.written());
+        return req.sendBody("Found");
+    };
 
-    try templates.respond(res, (templates.Search{
+    try templates.respond(alloc, req, (templates.Search{
         .q = q,
         .results = &results,
     }).interface());
 }
 
-fn getConsole(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    if (try User.parse(req)) |_| return templates.respond(res, (templates.SearchConsole{}).interface());
+fn getConsole(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    req.parseCookies(false);
+
+    var user = try User.parse(alloc, req);
+    defer if (user) |*u| u.deinit(alloc);
+
+    if (user) |_| return templates.respond(alloc, req, (templates.SearchConsole{}).interface());
+
     return error.AccessDenied;
 }
 
-fn postSubmitPage(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    if (try User.parse(req)) |*u| {
-        const data = try req.formData();
-        const public = data.has("public");
-        const url = data.get("url") orelse return error.InvalidRequest;
+fn postSubmitPage(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    req.parseCookies(false);
 
-        const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
-        defer res.arena.free(full_url);
+    var user = try User.parse(alloc, req) orelse return error.AccessDenied;
+    defer user.deinit(alloc);
 
-        const index_entry, const document = try crawl.crawl(res.arena, u, public, full_url);
-        defer {
-            res.arena.free(index_entry.title);
-            for (document.text) |l| res.arena.free(l);
-            res.arena.free(document.text);
-        }
-        try index_entry.put();
-        try document.put(&index_entry);
+    try req.parseBody();
 
-        return templates.respond(res, (templates.Message{
-            .title = "Search Console: Submitted Page",
-            .message = "The page has been submitted to the index.",
-            .is_error = false,
-        }).interface());
+    const public = try req.getParamStr(alloc, "public");
+    defer if (public) |p| alloc.free(p);
+
+    const url = try req.getParamStr(alloc, "url") orelse return error.InvalidRequest;
+    defer alloc.free(url);
+
+    const full_url = try std.mem.concat(alloc, u8, &.{ "http://", url });
+    defer alloc.free(full_url);
+
+    const index_entry, const document = try crawl.crawl(alloc, &user, public != null, full_url);
+    defer {
+        alloc.free(index_entry.title);
+        for (document.text) |l| alloc.free(l);
+        alloc.free(document.text);
     }
+    try index_entry.put();
+    try document.put(&index_entry);
 
-    return error.AccessDenied;
+    return templates.respond(alloc, req, (templates.Message{
+        .title = "Search Console: Submitted Page",
+        .message = "The page has been submitted to the index.",
+        .is_error = false,
+    }).interface());
 }
 
-fn postShortenUrl(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    if (try User.parse(req)) |_| {
-        const data = try req.formData();
-        const url = data.get("url") orelse return error.InvalidRequest;
+fn postShortenUrl(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try req.parseBody();
 
-        const full_url = try std.mem.concat(res.arena, u8, &.{ "http://", url });
-        defer res.arena.free(full_url);
+    const url = try req.getParamStr(alloc, "url") orelse return error.InvalidRequest;
+    defer alloc.free(url);
 
-        const short_url: ShortUrl = try .init(full_url);
-        try short_url.put();
+    const full_url = try std.mem.concat(alloc, u8, &.{ "http://", url });
+    defer alloc.free(full_url);
 
-        var message: std.Io.Writer.Allocating = .init(res.arena);
-        defer message.deinit();
-        try message.writer.writeAll("http://");
-        try message.writer.writeAll(req.header("host") orelse "[host]");
-        try message.writer.writeAll("/u/");
-        try message.writer.printHex(&short_url.hash, .lower);
+    const short_url: ShortUrl = try .init(full_url);
+    try short_url.put();
 
-        return templates.respond(res, (templates.Message{
-            .title = "Search Console: Shortened URL",
-            .message = try message.toOwnedSlice(),
-            .is_error = false,
-        }).interface());
-    }
+    var message: std.Io.Writer.Allocating = .init(alloc);
+    defer message.deinit();
+    try message.writer.writeAll("http://");
+    try message.writer.writeAll(req.getHeaderCommon(.host) orelse "[host]");
+    try message.writer.writeAll("/u/");
+    try message.writer.printHex(&short_url.hash, .lower);
 
-    return error.AccessDenied;
+    return templates.respond(alloc, req, (templates.Message{
+        .title = "Search Console: Shortened URL",
+        .message = try message.toOwnedSlice(),
+        .is_error = false,
+    }).interface());
 }
 
-fn getPreferences(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
-    const user = try User.parse(req);
-    const safe_search = try SafeSearch.parse(req);
-    try templates.respond(res, (templates.Preferences{ .user = user, .safe_search = safe_search }).interface());
+fn getPreferences(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    req.parseCookies(false);
+
+    var user = try User.parse(alloc, req);
+    defer if (user) |*u| u.deinit(alloc);
+
+    var safe_search = try SafeSearch.parse(alloc, req);
+    defer if (safe_search) |*ss| ss.deinit(alloc);
+
+    try templates.respond(alloc, req, (templates.Preferences{
+        .user = &user,
+        .safe_search = &safe_search,
+    }).interface());
+}
+
+fn postUserAccount(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try req.parseBody();
+
+    const username = try req.getParamStr(alloc, "username") orelse return error.InvalidRequest;
+    defer alloc.free(username);
+
+    const password = try req.getParamStr(alloc, "password") orelse return error.InvalidRequest;
+    defer alloc.free(password);
+
+    if (username.len == 0 or password.len == 0) return error.MissingUsernameOrPassword;
+
+    const user: User = try .login(username, password);
+
+    var value: std.Io.Writer.Allocating = .init(alloc);
+    defer value.deinit();
+    try value.writer.writeAll("username=");
+    try value.writer.writeAll(user.username);
+    try value.writer.writeAll("&hmac=");
+    try value.writer.printHex(&user.hmac, .lower);
+
+    try req.setCookie(.{ .name = "user_account", .value = value.written(), .secure = false });
+    try req.redirectTo("/preferences", null);
 }
 
 fn cookieValidChar(char: u8) bool {
@@ -193,92 +176,172 @@ fn cookieValidChar(char: u8) bool {
     };
 }
 
-fn postUserAccount(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    const data = try req.formData();
-    const username = data.get("username") orelse return error.InvalidRequest;
-    const password = data.get("password") orelse return error.InvalidRequest;
-    if (username.len == 0 or password.len == 0) return error.MissingUsernameOrPassword;
+fn postSafeSearch(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try req.parseBody();
 
-    const user: User = try .login(username, password);
+    const enabled = try req.getParamStr(alloc, "enabled");
+    defer if (enabled) |e| alloc.free(e);
 
-    var value: std.Io.Writer.Allocating = .init(res.arena);
+    const regex = try req.getParamStr(alloc, "regex") orelse return error.InvalidRequest;
+    defer alloc.free(regex);
+
+    var value: std.Io.Writer.Allocating = .init(alloc);
     defer value.deinit();
-    try value.writer.writeAll("username=");
-    try std.Uri.Component.percentEncode(&value.writer, user.username, cookieValidChar);
-    try value.writer.writeAll("&hmac=");
-    try value.writer.printHex(&user.hmac, .lower);
-
-    res.status = 302;
-    res.headers.add("Location", "/preferences");
-    try res.setCookie("user_account", try value.toOwnedSlice(), cookie_opts);
-}
-
-fn postSafeSearch(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    const data = try req.formData();
-    const enabled = data.has("enabled");
-    const regex = data.get("regex") orelse return error.InvalidRequest;
-
-    var value: std.Io.Writer.Allocating = .init(res.arena);
-    defer value.deinit();
-    if (enabled) try value.writer.writeAll("enabled=on&");
+    if (enabled != null) try value.writer.writeAll("enabled=on&");
     try value.writer.writeAll("regex=");
     try std.Uri.Component.percentEncode(&value.writer, regex, cookieValidChar);
 
-    res.status = 302;
-    res.headers.add("Location", "/preferences");
-    try res.setCookie("safe_search", try value.toOwnedSlice(), cookie_opts);
+    try req.setCookie(.{ .name = "safe_search", .value = value.written(), .secure = false });
+    try req.redirectTo("/preferences", null);
 }
 
-fn getPastebin(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.Pastebin{}).interface());
+fn getPastebin(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try templates.respond(alloc, req, (templates.Pastebin{}).interface());
 }
 
-fn postPastebin(_: @This(), req: *httpz.Request, res: *httpz.Response) !void {
-    const data = try req.formData();
+fn postPastebin(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try req.parseBody();
 
-    const title = data.get("title") orelse return error.InvalidRequest;
-    const text = data.get("text") orelse return error.InvalidRequest;
+    const title = try req.getParamStr(alloc, "title") orelse return error.InvalidRequest;
+    defer alloc.free(title);
+    const text = try req.getParamStr(alloc, "text") orelse return error.InvalidRequest;
+    defer alloc.free(text);
 
     const paste: Paste = .init(title, text);
     try paste.put();
 
-    var location: std.Io.Writer.Allocating = .init(res.arena);
+    var location: std.Io.Writer.Allocating = .init(alloc);
     defer location.deinit();
     try location.writer.print("/p/{s}", .{std.fmt.bytesToHex(paste.hash, .lower)});
 
-    res.status = 302;
-    res.headers.add("Location", try location.toOwnedSlice());
+    try req.redirectTo(location.written(), null);
 }
 
-fn getUrl(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
-    const hash = req.param("hash") orelse return error.InvalidRequest;
+fn getUrl(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    const hash = req.path.?[3..];
 
-    var short_url: ShortUrl = try .get(req.arena, try utils.hexToBytes(ShortUrl.bytes, hash));
-    defer short_url.deinit(res.arena);
+    var short_url: ShortUrl = try .get(alloc, try utils.hexToBytes(ShortUrl.bytes, hash));
+    defer short_url.deinit(alloc);
 
-    var location: std.Io.Writer.Allocating = .init(res.arena);
+    var location: std.Io.Writer.Allocating = .init(alloc);
     defer location.deinit();
     try short_url.url.format(&location.writer);
 
-    res.status = 302;
-    res.headers.add("Location", try location.toOwnedSlice());
+    try req.redirectTo(location.written(), null);
 }
 
-fn getPaste(_: @This(), req: *const httpz.Request, res: *httpz.Response) !void {
-    const hash = req.param("hash") orelse return error.InvalidRequest;
-    var paste: Paste = try .get(req.arena, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
-    defer paste.deinit(res.arena);
-    try templates.respond(res, (templates.Paste{ .paste = &paste }).interface());
+fn getPaste(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    const hash = req.path.?[3..];
+    var paste: Paste = try .get(alloc, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
+    defer paste.deinit(alloc);
+    try templates.respond(alloc, req, (templates.Paste{ .paste = &paste }).interface());
 }
 
-fn getHelp(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
-    try templates.respond(res, (templates.SearchTips{}).interface());
+fn getHelp(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    try templates.respond(alloc, req, (templates.SearchTips{}).interface());
 }
 
-fn getLogoGif(_: @This(), _: *const httpz.Request, res: *httpz.Response) !void {
-    res.content_type = .GIF;
-    res.headers.add("Cache-Control", "max-age=" ++ std.fmt.comptimePrint("{d}", .{60 * 60 * 24}));
-    res.body = @embedFile("static/logo.gif");
+fn getLogoGif(req: *const zap.Request) !void {
+    try req.setHeader("Content-Type", "image/gif");
+    try req.setHeader("Cache-Control", "max-age=" ++ std.fmt.comptimePrint("{d}", .{60 * 60 * 24}));
+    try req.sendBody(@embedFile("static/logo.gif"));
+}
+
+const Prefix = u40;
+const prefix_bytes = @typeInfo(Prefix).int.bits / 8;
+
+fn prefix(bytes: []const u8) Prefix {
+    std.debug.assert(bytes.len >= prefix_bytes);
+    return std.mem.readInt(Prefix, bytes[0..prefix_bytes], .big);
+}
+
+fn eqlSuffix(a: []const u8, comptime b: []const u8) bool {
+    std.debug.assert(a.len >= prefix_bytes);
+    comptime std.debug.assert(b.len >= prefix_bytes);
+    if (a.len != b.len) return false;
+    if (comptime b.len <= prefix_bytes) return true;
+    return std.mem.eql(u8, a[prefix_bytes..], b[prefix_bytes..]);
+}
+
+fn startSuffix(a: []const u8, comptime b: []const u8) bool {
+    std.debug.assert(a.len >= prefix_bytes);
+    if (comptime b.len <= prefix_bytes) return true;
+    return std.mem.eql(u8, a[prefix_bytes..b.len], b[prefix_bytes..]);
+}
+
+fn sendMethodNotAllowed(req: *const zap.Request, allow: []const u8) !void {
+    req.setStatus(.method_not_allowed);
+    try req.setHeader("Allow", allow);
+    return req.sendBody("Method Not Allowed");
+}
+
+fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    if (req.path) |path| {
+        if (path.len == 1 and path[0] == '/') {
+            if (req.methodAsEnum() != .GET) return sendMethodNotAllowed(req, "GET");
+            return getIndex(alloc, req);
+        }
+
+        const method = req.methodAsEnum();
+        if (path.len >= prefix_bytes) switch (prefix(path)) {
+            prefix("/search") => if (eqlSuffix(path, "/search")) return switch (method) {
+                .GET => getSearch(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/console") => if (eqlSuffix(path, "/console")) return switch (method) {
+                .GET => getConsole(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/submit_page") => if (eqlSuffix(path, "/submit_page")) return switch (method) {
+                .POST => postSubmitPage(alloc, req),
+                else => sendMethodNotAllowed(req, "POST"),
+            },
+            prefix("/shorten_url") => if (eqlSuffix(path, "/shorten_url")) return switch (method) {
+                .POST => postShortenUrl(alloc, req),
+                else => sendMethodNotAllowed(req, "POST"),
+            },
+            prefix("/preferences") => if (eqlSuffix(path, "/preferences")) return switch (method) {
+                .GET => getPreferences(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/user_account") => if (eqlSuffix(path, "/user_account")) return switch (method) {
+                .POST => postUserAccount(alloc, req),
+                else => sendMethodNotAllowed(req, "POST"),
+            },
+            prefix("/safe_search") => if (eqlSuffix(path, "/safe_search")) return switch (method) {
+                .POST => postSafeSearch(alloc, req),
+                else => sendMethodNotAllowed(req, "POST"),
+            },
+            prefix("/pastebin") => if (eqlSuffix(path, "/pastebin")) return switch (method) {
+                .GET => getPastebin(alloc, req),
+                .POST => postPastebin(alloc, req),
+                else => sendMethodNotAllowed(req, "GET, POST"),
+            },
+            prefix("/u/00")...prefix("/u/ff"),
+            => switch (method) {
+                .GET => if (startSuffix(path, "/u/") and path.len == 3 + ShortUrl.bytes * 2) return getUrl(alloc, req),
+                else => return sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/p/00")...prefix("/p/ff"),
+            => switch (method) {
+                .GET => if (startSuffix(path, "/p/") and path.len == 3 + @sizeOf(utils.Hash) * 2) return getPaste(alloc, req),
+                else => return sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/help") => if (eqlSuffix(path, "/help")) return switch (method) {
+                .GET => getHelp(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/logo.gif") => if (eqlSuffix(path, "/logo.gif")) return switch (method) {
+                .GET => getLogoGif(req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            else => {},
+        };
+    }
+
+    req.setStatus(.not_found);
+    try req.setContentType(.TEXT);
+    try req.sendBody("Not Found");
 }
 
 fn makeDir(sub_path: []const u8) !void {
@@ -289,12 +352,6 @@ fn makeDir(sub_path: []const u8) !void {
 }
 
 pub fn main() !void {
-    std.posix.sigaction(std.posix.SIG.INT, &.{
-        .handler = .{ .handler = shutdown },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    }, null);
-
     try makeDir("documents");
     try makeDir("index");
     try makeDir("pastes");
@@ -302,38 +359,21 @@ pub fn main() !void {
     try makeDir("users");
 
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
 
-    var server: httpz.Server(@This()) = try .init(allocator, .{
-        .address = .all(7777),
-        .request = .{ .max_form_count = 6 },
-        .workers = .{ .count = 1 },
-    }, .{});
-    defer {
-        server.stop();
-        server.deinit();
-    }
+    const Handler = struct {
+        var alloc: std.mem.Allocator = undefined;
+        fn handleRequest_(req: zap.Request) !void {
+            try handleRequest(alloc, &req);
+        }
+    };
+    Handler.alloc = gpa.allocator();
 
-    var router = try server.router(.{});
-    router.get("/", getIndex, .{});
-    router.get("/search", getSearch, .{});
-    router.get("/console", getConsole, .{});
-    router.post("/submit_page", postSubmitPage, .{});
-    router.post("/shorten_url", postShortenUrl, .{});
-    router.get("/preferences", getPreferences, .{});
-    router.post("/user_account", postUserAccount, .{});
-    router.post("/safe_search", postSafeSearch, .{});
-    router.get("/pastebin", getPastebin, .{});
-    router.post("/pastebin", postPastebin, .{});
-    router.get("/u/:hash", getUrl, .{});
-    router.get("/p/:hash", getPaste, .{});
-    router.get("/help", getHelp, .{});
-    router.get("/logo.gif", getLogoGif, .{});
-
-    server_instance = &server;
-    try server.listen();
-}
-
-test {
-    std.testing.refAllDeclsRecursive(@This());
+    var listener: zap.HttpListener = .init(.{
+        .port = 7777,
+        .on_request = Handler.handleRequest_,
+        .max_clients = 1_000_000,
+    });
+    try listener.listen();
+    zap.start(.{ .workers = 2, .threads = 8 });
 }

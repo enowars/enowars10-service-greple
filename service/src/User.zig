@@ -1,7 +1,7 @@
-const httpz = @import("httpz");
 const mvzr = @import("mvzr");
 const std = @import("std");
 const utils = @import("utils.zig");
+const zap = @import("zap");
 
 const re = mvzr.compile("[a-zA-Z0-9]+").?;
 
@@ -9,32 +9,40 @@ hash: utils.Hash,
 username: []const u8,
 hmac: utils.Hmac,
 
-pub fn parse(req: *const httpz.Request) !?@This() {
+pub fn parse(alloc: std.mem.Allocator, req: *const zap.Request) !?@This() {
     var username: ?[]const u8 = null;
+    defer if (username) |u| alloc.free(u);
     var hmac: ?utils.Hmac = null;
 
-    if (req.cookies().get("user_account")) |c| {
+    if (try req.getCookieStr(alloc, "user_account")) |c| {
+        defer alloc.free(c);
         var it = std.mem.splitScalar(u8, c, '&');
         while (it.next()) |kv| {
             if (std.mem.indexOfScalarPos(u8, kv, 0, '=')) |s| {
                 const k = kv[0..s];
-                // TODO: is dupe required?
-                const v = std.Uri.percentDecodeInPlace(try req.arena.dupe(u8, kv[s + 1 ..]));
+                const v = kv[s + 1 ..];
                 if (std.mem.eql(u8, k, "username")) {
-                    username = v;
+                    if (username) |_| return null;
+                    username = try alloc.dupe(u8, v);
                 } else if (std.mem.eql(u8, k, "hmac")) {
+                    if (hmac) |_| return null;
                     hmac = utils.hexToBytes(@sizeOf(utils.Hmac), v) catch null;
+                } else {
+                    return null;
                 }
             }
         }
     }
 
     if (username) |u| if (hmac) |h| {
-        if (std.mem.eql(u8, &h, &utils.hmac(u))) return .{
-            .hash = utils.hash(u),
-            .username = u,
-            .hmac = h,
-        };
+        if (std.mem.eql(u8, &h, &utils.hmac(u))) {
+            defer username = null;
+            return .{
+                .hash = utils.hash(u),
+                .username = u,
+                .hmac = h,
+            };
+        }
     };
 
     return null;
@@ -75,4 +83,9 @@ pub fn login(username: []const u8, password: []const u8) !@This() {
         .username = username,
         .hmac = utils.hmac(username),
     };
+}
+
+pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+    alloc.free(self.username);
+    self.* = undefined;
 }

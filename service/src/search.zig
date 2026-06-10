@@ -64,11 +64,11 @@ const Regex = mvzr.SizedRegex(64, 2);
 fn aggregateResults(
     alloc: std.mem.Allocator,
     user: *const ?User,
-    safe_search: *const SafeSearch,
+    safe_search: *const ?SafeSearch,
     query: *const Query,
     stdout: []const u8,
 ) !HashMap {
-    const regex: ?Regex = if (safe_search.enabled) .compile(safe_search.regex) else null;
+    const regex: ?Regex = if (safe_search.*) |ss| if (ss.enabled) .compile(ss.regex) else null else null;
 
     var results: HashMap = .init(alloc);
 
@@ -146,7 +146,7 @@ pub const Results = struct {
 pub fn performSearch(
     alloc: std.mem.Allocator,
     user: *const ?User,
-    safe_search: *const SafeSearch,
+    safe_search: *const ?SafeSearch,
     query: *const Query,
 ) !Results {
     var timer: std.time.Timer = try .start();

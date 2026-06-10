@@ -50,7 +50,6 @@ fn fetch(
             switch (std.mem.bigToNative(u32, a.in.sa.addr)) {
                 bytesToU32(.{ 10, 0, 0, 0 })...bytesToU32(.{ 10, 255, 255, 255 }),
                 bytesToU32(.{ 91, 99, 0, 0 })...bytesToU32(.{ 91, 99, 255, 255 }), // TODO: remove CICD
-                bytesToU32(.{ 172, 18, 0, 1 }), // TODO: remove local testing
                 => {},
                 else => continue,
             }
