@@ -84,12 +84,10 @@ pub fn getUserEntries(alloc: std.mem.Allocator, user: *const User) ![]const @Thi
     while (try it.next()) |e| {
         var ie = try getFn(alloc, dir, e.name);
         errdefer ie.deinit(alloc);
-        std.debug.print("{f}\n", .{ie.url});
         if (!std.mem.eql(u8, &user.hash, &ie.user_hash)) {
             ie.deinit(alloc);
             continue;
         }
-        std.debug.print("ok\n", .{});
         try entries.append(alloc, ie);
     }
 

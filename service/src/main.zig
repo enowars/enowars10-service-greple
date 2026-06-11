@@ -349,7 +349,11 @@ fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
 }
 
 fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
-    route(alloc, req) catch |err| {
+    var arena: std.heap.ArenaAllocator = .init(alloc);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    route(arena_alloc, req) catch |err| {
         const safe_err = switch (err) {
             error.HostTooLong,
             error.InvalidPassword,
@@ -383,14 +387,14 @@ fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
 
         std.log.info("{s} {s} {}", .{ req.method.?, req.path.?, err });
 
-        var message: std.Io.Writer.Allocating = .init(alloc);
+        var message: std.Io.Writer.Allocating = .init(arena_alloc);
         defer message.deinit();
         for (@errorName(safe_err)) |c| {
             if (std.ascii.isUpper(c)) try message.writer.writeByte(' ');
             try message.writer.writeByte(c);
         }
 
-        try templates.respond(alloc, req, (templates.Message{
+        try templates.respond(arena_alloc, req, (templates.Message{
             .title = "Error",
             .message = message.written(),
             .is_error = true,
