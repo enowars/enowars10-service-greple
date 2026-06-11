@@ -152,7 +152,6 @@ pub fn crawl(
         .{
             .public = public,
             .user_hash = user.hash,
-            .url_hash = u.hash(),
             .url = u,
             .title = d_title,
         },

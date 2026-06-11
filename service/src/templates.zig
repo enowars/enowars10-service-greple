@@ -1,4 +1,3 @@
-const search = @import("search.zig");
 const std = @import("std");
 const zap = @import("zap");
 
@@ -47,6 +46,7 @@ const Base = struct {
             \\    .form>[type="submit"]{{grid-column:1/3}}
             \\    a[name]{{display:block;font-weight:bold;margin-top:2.5rem}}
             \\    a[name]:first-child{{margin-top:unset}}
+            \\    td:last-child{{text-align:center}}
             \\  </style>
             \\</head>
             \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">{f}</body>
@@ -167,7 +167,7 @@ const Columns = struct {
 
 pub const Search = struct {
     q: []const u8,
-    results: *const search.Results,
+    results: *const @import("search.zig").Results,
 
     fn formatTitle(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
@@ -287,19 +287,43 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
+    entries: []const @import("IndexEntry.zig"),
+
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
     }
 
     fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
+            \\<li><a href="#user_index">User Index</a></li>
             \\<li><a href="#submit_page">Submit Page</a></li>
             \\<li><a href="#shorten_url">Shorten URL</a></li>
         );
     }
 
-    fn formatMain(_: *const anyopaque, w: *std.Io.Writer) !void {
+    fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
         try w.writeAll(
+            \\<a name="user_index">User Index</a>
+            \\<p>These are the pages you submitted to the index or where submitted for one of your hosts.</p>
+            \\<table>
+            \\  <thead>
+            \\    <tr><th>URL</th><th>Title</th><th>Public?</th></tr>
+            \\  </thead>
+            \\  <tbody>
+        );
+        for (s.entries) |e| {
+            try w.print(
+                \\<tr><td>{f}</td><td>{f}</td><td>{s}</td></tr>
+            , .{
+                e.url,
+                Escape{ .string = e.title },
+                if (e.public) "Yes" else "No",
+            });
+        }
+        try w.writeAll(
+            \\  </tbody>
+            \\</table>
             \\<a name="submit_page">Submit Page</a>
             \\<p>Submit a page to be crawled and added to the search index. Enter the full URL of the page. If you select public anybody will be able to search for the page, if not only your user account will be able to find the page.</p>
             \\<form action="/submit_page" method="POST" class="form">

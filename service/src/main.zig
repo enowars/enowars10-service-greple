@@ -43,6 +43,7 @@ fn getSearch(alloc: std.mem.Allocator, req: *const zap.Request) !void {
         };
         break :blk try search.performSearch(alloc, &user, &safe_search, &query);
     };
+    defer results.deinit(alloc);
 
     if (req.getParamSlice("lucky")) |_| if (results.results.len > 0) {
         var location: std.Io.Writer.Allocating = .init(alloc);
@@ -63,12 +64,15 @@ fn getSearch(alloc: std.mem.Allocator, req: *const zap.Request) !void {
 fn getConsole(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     req.parseCookies(false);
 
-    var user = try User.parse(alloc, req);
-    defer if (user) |*u| u.deinit(alloc);
+    var user = try User.parse(alloc, req) orelse return error.AccessDenied;
+    defer user.deinit(alloc);
 
-    if (user) |_| return templates.respond(alloc, req, (templates.SearchConsole{}).interface());
+    const entries = try IndexEntry.getUserEntries(alloc, &user);
+    defer alloc.free(entries);
 
-    return error.AccessDenied;
+    return templates.respond(alloc, req, (templates.SearchConsole{
+        .entries = entries,
+    }).interface());
 }
 
 fn postSubmitPage(alloc: std.mem.Allocator, req: *const zap.Request) !void {

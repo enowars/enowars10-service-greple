@@ -19,7 +19,7 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     var user_dir = try dir.openDir(&dirname, .{});
     defer user_dir.close();
 
-    var file = try user_dir.createFile(&std.fmt.bytesToHex(index_entry.url_hash, .lower), .{});
+    var file = try user_dir.createFile(&std.fmt.bytesToHex(index_entry.url.hash(), .lower), .{});
     defer file.close();
 
     var writer = file.writer(&.{});

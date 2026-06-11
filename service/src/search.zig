@@ -47,6 +47,12 @@ const Result = struct {
     fn order(self: *const @This(), other: *const @This()) std.math.Order {
         return std.math.order(self.score, other.score).invert();
     }
+
+    fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        self.url.deinit(alloc);
+        alloc.free(self.title);
+        self.* = undefined;
+    }
 };
 
 const HashMap = std.HashMap(utils.Hash, Result, struct {
@@ -122,15 +128,18 @@ fn aggregateResults(
     return results;
 }
 
-fn getTop10Results(alloc: std.mem.Allocator, results: HashMap) ![]const *const Result {
-    var top10_results: std.ArrayList(*const Result) = try .initCapacity(alloc, @min(10, results.count()));
+fn getTop10Results(alloc: std.mem.Allocator, results: HashMap) ![]const *Result {
+    var top10_results: std.ArrayList(*Result) = try .initCapacity(alloc, @min(10, results.count()));
     defer top10_results.deinit(alloc);
 
     var it = results.iterator();
     while (it.next()) |e| {
-        const i = std.sort.upperBound(*const Result, top10_results.items, e.value_ptr, Result.order);
-        if (i == top10_results.capacity) continue;
-        if (top10_results.items.len == top10_results.capacity) _ = top10_results.pop();
+        const i = std.sort.upperBound(*Result, top10_results.items, e.value_ptr, Result.order);
+        if (i == top10_results.capacity) {
+            e.value_ptr.deinit(alloc);
+            continue;
+        }
+        if (top10_results.items.len == top10_results.capacity) top10_results.pop().?.deinit(alloc);
         top10_results.insertAssumeCapacity(i, e.value_ptr);
     }
 
@@ -138,9 +147,15 @@ fn getTop10Results(alloc: std.mem.Allocator, results: HashMap) ![]const *const R
 }
 
 pub const Results = struct {
-    results: []const *const Result,
+    results: []const *Result,
     time: u64,
     total: usize,
+
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        for (self.results) |r| r.deinit(alloc);
+        alloc.free(self.results);
+        self.* = undefined;
+    }
 };
 
 pub fn performSearch(
