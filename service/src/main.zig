@@ -279,7 +279,7 @@ fn sendMethodNotAllowed(req: *const zap.Request, allow: []const u8) !void {
     return req.sendBody("Method Not Allowed");
 }
 
-fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     if (req.path) |path| {
         if (path.len == 1 and path[0] == '/') {
             if (req.methodAsEnum() != .GET) return sendMethodNotAllowed(req, "GET");
@@ -346,6 +346,56 @@ fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     req.setStatus(.not_found);
     try req.setContentType(.TEXT);
     try req.sendBody("Not Found");
+}
+
+fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    route(alloc, req) catch |err| {
+        const safe_err = switch (err) {
+            error.HostTooLong,
+            error.InvalidPassword,
+            error.InvalidRequest,
+            error.InvalidUrl,
+            error.InvalidUsername,
+            error.MissingUsernameOrPassword,
+            error.PathTooLong,
+            error.TextTooLong,
+            error.TitleTooLong,
+            => |bad_request_err| blk: {
+                req.setStatus(.bad_request);
+                break :blk bad_request_err;
+            },
+            error.AccessDenied,
+            error.InvalidCredentials,
+            => |forbidden_err| blk: {
+                req.setStatus(.forbidden);
+                break :blk forbidden_err;
+            },
+            error.IndexingFailed,
+            => |internal_err| blk: {
+                req.setStatus(.internal_server_error);
+                break :blk internal_err;
+            },
+            else => blk: {
+                req.setStatus(.internal_server_error);
+                break :blk error.InternalServerError;
+            },
+        };
+
+        std.log.info("{s} {s} {}", .{ req.method.?, req.path.?, err });
+
+        var message: std.Io.Writer.Allocating = .init(alloc);
+        defer message.deinit();
+        for (@errorName(safe_err)) |c| {
+            if (std.ascii.isUpper(c)) try message.writer.writeByte(' ');
+            try message.writer.writeByte(c);
+        }
+
+        try templates.respond(alloc, req, (templates.Message{
+            .title = "Error",
+            .message = message.written(),
+            .is_error = true,
+        }).interface());
+    };
 }
 
 fn makeDir(sub_path: []const u8) !void {
