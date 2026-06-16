@@ -1,4 +1,4 @@
-FROM python:3.11-trixie
+FROM python:3.14-trixie
 RUN apt-get update -y && apt-get upgrade -y 
 
 RUN useradd -ms /bin/bash -u 1000 checker

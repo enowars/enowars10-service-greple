@@ -1,20 +1,11 @@
 const std = @import("std");
 const utils = @import("utils.zig");
 
-hash: utils.Hash,
 title: []const u8,
 text: []const u8,
 
 fn openDir() !std.fs.Dir {
     return std.fs.cwd().openDir("pastes", .{});
-}
-
-pub fn init(title: []const u8, text: []const u8) @This() {
-    return .{
-        .hash = utils.combineHashes(utils.hash(title), utils.hash(text)),
-        .title = title,
-        .text = text,
-    };
 }
 
 pub fn put(self: *const @This()) !void {
@@ -24,7 +15,7 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir();
     defer dir.close();
 
-    const filename = std.fmt.bytesToHex(self.hash, .lower);
+    const filename = std.fmt.bytesToHex(self.hash(), .lower);
     var file = dir.createFile(&filename, .{ .exclusive = true }) catch |err| switch (err) {
         std.fs.File.OpenError.PathAlreadyExists => return,
         else => |leftover_err| return leftover_err,
@@ -39,21 +30,26 @@ pub fn put(self: *const @This()) !void {
     try writer.interface.writeAll(self.text);
 }
 
-pub fn get(alloc: std.mem.Allocator, hash: utils.Hash) !@This() {
+pub fn get(alloc: std.mem.Allocator, paste_hash: utils.Hash) !@This() {
     var dir = try openDir();
     defer dir.close();
 
-    var file = try dir.openFile(&std.fmt.bytesToHex(hash, .lower), .{});
+    var file = try dir.openFile(&std.fmt.bytesToHex(paste_hash, .lower), .{});
     defer file.close();
 
     var buffer: [@sizeOf(u16)]u8 = undefined;
     var reader = file.reader(&buffer);
 
-    return .{
-        .hash = hash,
-        .title = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
-        .text = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little)),
-    };
+    const title = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little));
+    errdefer alloc.free(title);
+    const text = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little));
+    errdefer alloc.free(text);
+
+    return .{ .title = title, .text = text };
+}
+
+pub fn hash(self: *const @This()) utils.Hash {
+    return utils.hash(&utils.hash(self.title) ++ &utils.hash(self.text));
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

@@ -26,3 +26,9 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
 
     for (self.text) |l| try writer.interface.print("{s}\n", .{l});
 }
+
+pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+    for (self.text) |l| alloc.free(l);
+    alloc.free(self.text);
+    self.* = undefined;
+}

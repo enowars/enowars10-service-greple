@@ -21,9 +21,9 @@ def printable_noise(entropy: int) -> str:
     return _noise(string.printable, "", entropy)
 
 
-def alnum_noise(entropy: int) -> str:
-    """Generate noise consisting of ASCII letter and digits."""
-    return _noise(string.ascii_letters + string.digits, "", entropy)
+def username_noise(entropy: int) -> str:
+    """Generate noise that can be used as a valid username."""
+    return _noise(string.ascii_letters + string.digits + "_+-=", "", entropy)
 
 
 def word_noise(entropy: int) -> str:

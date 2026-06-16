@@ -1,18 +1,13 @@
 const std = @import("std");
+const User = @import("User.zig");
+const utils = @import("utils.zig");
 const zap = @import("zap");
 
 const Escape = struct {
     string: []const u8,
 
     pub fn format(self: *const @This(), w: *std.Io.Writer) !void {
-        for (self.string) |c| try w.writeAll(switch (c) {
-            '&' => "&amp;",
-            '<' => "&lt;",
-            '>' => "&gt;",
-            '"' => "&quot;",
-            '\'' => "&#39;",
-            else => &.{c},
-        });
+        try utils.escape(self.string, w);
     }
 };
 
@@ -41,15 +36,35 @@ const Base = struct {
             \\  <title>{f}</title>
             \\  <style>
             \\    *{{box-sizing:border-box}}
-            \\    body{{font-family:Arial,sans-serif}}
+            \\    html{{font-family:Arial,sans-serif;scroll-padding-top:1rem}}
             \\    .form{{display:grid;grid-template-columns:repeat(2,max-content);justify-items:flex-start;gap:.5rem;margin:1rem 0}}
             \\    .form>[type="submit"]{{grid-column:1/3}}
             \\    a[name]{{display:block;font-weight:bold;margin-top:2.5rem}}
             \\    a[name]:first-child{{margin-top:unset}}
-            \\    td:last-child{{text-align:center}}
+            \\    table{{border-collapse:collapse}}
+            \\    thead{{border-bottom:2px solid black}}
+            \\    th,td{{border:1px solid black;padding:4pt}}
+            \\    td:first-child{{white-space:nowrap}}
+            \\    small>a{{color:#6f6f6f}}
             \\  </style>
             \\</head>
-            \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">{f}</body>
+            \\<body bgcolor="#ffffff" text="#000000" link="#0000cc" vlink="#551A8B" alink="#ff0000">
+            \\  {f}
+            \\  <script>
+            \\    function refresh(h) {{
+            \\      const form = document.createElement('form');
+            \\      form.action = '/refresh';
+            \\      form.method = 'POST';
+            \\      const input = document.createElement('input');
+            \\      input.type = 'hidden';
+            \\      input.name = 'hash';
+            \\      input.value = h;
+            \\      form.appendChild(input);
+            \\      document.body.appendChild(form);
+            \\      form.submit();
+            \\    }}
+            \\  </script>
+            \\</body>
             \\</html>
         , .{
             Template{ .self = s.self, .formatFn = s.formatTitleFn },
@@ -205,13 +220,14 @@ pub const Search = struct {
             \\<p>
             \\  <a href="{f}">{f}</a>
             \\  <small style="-webkit-box-orient: vertical; -webkit-line-clamp: 3; display: -webkit-box; overflow: hidden; text-overflow: ellipsis; width: 32rem">{f}</small>
-            \\  <small><font color="green">{f}</font></small>
+            \\  <small><font color="green">{f} -</font> <a href="javascript:refresh('{s}')">Refresh</a></small>
             \\</p>
         , .{
-            r.url,
-            Escape{ .string = r.title },
+            r.index_entry.url,
+            Escape{ .string = r.index_entry.title },
             Escape{ .string = r.text },
-            r.url,
+            r.index_entry.url,
+            std.fmt.bytesToHex(r.index_entry.hash(), .lower),
         });
     }
 
@@ -230,7 +246,7 @@ pub const Search = struct {
 };
 
 pub const Preferences = struct {
-    user: *const ?@import("User.zig"),
+    user: *const ?User,
     safe_search: *const ?@import("SafeSearch.zig"),
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
@@ -287,7 +303,9 @@ pub const Preferences = struct {
 };
 
 pub const SearchConsole = struct {
+    users: *const utils.HashMap(User),
     entries: []const @import("IndexEntry.zig"),
+    netlocs: []const @import("Netloc.zig"),
 
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Search Console");
@@ -295,32 +313,33 @@ pub const SearchConsole = struct {
 
     fn formatToc(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll(
-            \\<li><a href="#user_index">User Index</a></li>
+            \\<li><a href="#pages">Pages</a></li>
             \\<li><a href="#submit_page">Submit Page</a></li>
             \\<li><a href="#shorten_url">Shorten URL</a></li>
+            \\<li><a href="#netlocs">Netlocs</a></li>
+            \\<li><a href="#verify_netloc">Verify Netloc</a></li>
         );
     }
 
     fn formatMain(self: *const anyopaque, w: *std.Io.Writer) !void {
         const s: *const @This() = @ptrCast(@alignCast(self));
         try w.writeAll(
-            \\<a name="user_index">User Index</a>
-            \\<p>These are the pages you submitted to the index or where submitted for one of your hosts.</p>
+            \\<a name="pages">Pages</a>
+            \\<p>These are the pages you submitted to the index or where submitted for one of your netlocs.</p>
             \\<table>
             \\  <thead>
-            \\    <tr><th>URL</th><th>Title</th><th>Public?</th></tr>
+            \\    <tr><th>URL</th><th>Added by</th><th>Public?</th><th>&nbsp;</th></tr>
             \\  </thead>
             \\  <tbody>
         );
-        for (s.entries) |e| {
-            try w.print(
-                \\<tr><td>{f}</td><td>{f}</td><td>{s}</td></tr>
-            , .{
-                e.url,
-                Escape{ .string = e.title },
-                if (e.public) "Yes" else "No",
-            });
-        }
+        for (s.entries) |e| try w.print(
+            \\<tr><td>{f}</td><td>{f}</td><td>{s}</td><td><a href="javascript:refresh('{s}')">Refresh</a></td></tr>
+        , .{
+            e.url,
+            Escape{ .string = s.users.get(e.user_hash).?.username },
+            if (e.public) "Yes" else "No",
+            std.fmt.bytesToHex(e.hash(), .lower),
+        });
         try w.writeAll(
             \\  </tbody>
             \\</table>
@@ -339,6 +358,32 @@ pub const SearchConsole = struct {
             \\  <label for="shorten_url_url">URL:</label>
             \\  <span>http://<input id="shorten_url_url" name="url" size="64"></span>
             \\  <input type="submit" value="Shorten">
+            \\</form>
+            \\<a name="netlocs">Netlocs</a>
+            \\<p>These are netlocs you verified your ownership of.</p>
+            \\<table>
+            \\  <thead>
+            \\    <tr><th>Netloc</th><th>API key</th></tr>
+            \\  </thead>
+            \\  <tbody>
+        );
+        for (s.netlocs) |nl| try w.print(
+            \\<tr><td>{f}</td><td>{f}</td></tr>
+        , .{
+            nl,
+            Escape{ .string = nl.api_key },
+        });
+        try w.writeAll(
+            \\  </tbody>
+            \\</table>
+            \\<a name="verify_netloc">Verify Netloc</a>
+            \\<p>Verify the ownership of a netloc (host:port) by entering a token received in the X-Token HTTP header. You can set an API key that will be send to pages you submit with the netloc as X-API-Key.</p>
+            \\<form action="/verify_netloc" method="POST" class="form">
+            \\  <label for="verify_netloc_netloc">Netloc:</label>
+            \\  <input id="verify_netloc_netloc" name="netloc" size="32">
+            \\  <label for="verify_netloc_api_key">API key:</label>
+            \\  <input id="verify_netloc_api_key" name="api_key" size="32">
+            \\  <input type="submit" value="Verify">
             \\</form>
         );
     }
@@ -470,6 +515,33 @@ pub const Paste = struct {
         while (it.next()) |l| {
             if (l.len == 0) continue;
             try w.print("<p>{f}</p>", .{Escape{ .string = l }});
+        }
+    }
+
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Base{
+            .self = self,
+            .formatTitleFn = &formatTitle,
+            .formatBodyFn = &formatBody,
+        }).interface().format(w);
+    }
+
+    pub fn interface(self: *const @This()) Template {
+        return .{ .self = self, .formatFn = &format };
+    }
+};
+
+pub const Echo = struct {
+    headers: *const zap.Request.HttpParamStrKVList,
+
+    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll("Echo Testing");
+    }
+
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        for (s.headers.items) |kv| {
+            try w.print("<p>{f}: {f}</p>", .{ Escape{ .string = kv.key }, Escape{ .string = kv.value } });
         }
     }
 

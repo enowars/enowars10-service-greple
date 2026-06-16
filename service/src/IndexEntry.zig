@@ -1,3 +1,4 @@
+const Netloc = @import("Netloc.zig");
 const std = @import("std");
 const Url = @import("Url.zig");
 const User = @import("User.zig");
@@ -12,17 +13,13 @@ pub fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
     return std.fs.cwd().openDir("index", args);
 }
 
-fn genFilename(user_hash: utils.Hash, url_hash: utils.Hash) [@sizeOf(utils.Hash) * 2]u8 {
-    return std.fmt.bytesToHex(utils.combineHashes(user_hash, url_hash), .lower);
-}
-
 pub fn put(self: *const @This()) !void {
     if (self.title.len > std.math.maxInt(u16)) return error.TitleTooLong;
 
     var dir = try openDir(.{});
     defer dir.close();
 
-    var file = try dir.createFile(&genFilename(self.user_hash, self.url.hash()), .{});
+    var file = try dir.createFile(&std.fmt.bytesToHex(self.hash(), .lower), .{});
     defer file.close();
 
     var writer = file.writer(&.{});
@@ -34,7 +31,7 @@ pub fn put(self: *const @This()) !void {
     try writer.interface.writeAll(self.title);
 }
 
-fn getFn(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !@This() {
+fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !@This() {
     const file = try dir.openFile(filename, .{});
     defer file.close();
 
@@ -56,10 +53,10 @@ fn getFn(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !@This
     };
 }
 
-pub fn get(alloc: std.mem.Allocator, user_hash: utils.Hash, url_hash: utils.Hash) !@This() {
+pub fn get(alloc: std.mem.Allocator, index_entry_hash: utils.Hash) !@This() {
     var dir = try openDir(.{});
     defer dir.close();
-    return getFn(alloc, dir, &genFilename(user_hash, url_hash));
+    return getFromDir(alloc, dir, &std.fmt.bytesToHex(index_entry_hash, .lower));
 }
 
 pub fn getSize() !u32 {
@@ -73,7 +70,7 @@ pub fn getSize() !u32 {
     return size;
 }
 
-pub fn getUserEntries(alloc: std.mem.Allocator, user: *const User) ![]const @This() {
+pub fn getByUserOrNetloc(alloc: std.mem.Allocator, user_hash: utils.Hash, netlocs: []const Netloc) ![]const @This() {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
@@ -81,17 +78,28 @@ pub fn getUserEntries(alloc: std.mem.Allocator, user: *const User) ![]const @Thi
     defer entries.deinit(alloc);
 
     var it = dir.iterateAssumeFirstIteration();
-    while (try it.next()) |e| {
-        var ie = try getFn(alloc, dir, e.name);
+    outer: while (try it.next()) |e| {
+        var ie = try getFromDir(alloc, dir, e.name);
         errdefer ie.deinit(alloc);
-        if (!std.mem.eql(u8, &user.hash, &ie.user_hash)) {
-            ie.deinit(alloc);
+
+        if (std.mem.eql(u8, &user_hash, &ie.user_hash)) {
+            try entries.append(alloc, ie);
             continue;
         }
-        try entries.append(alloc, ie);
+
+        for (netlocs) |nl| if (std.mem.eql(u8, nl.host, ie.url.host) and nl.port == ie.url.port) {
+            try entries.append(alloc, ie);
+            continue :outer;
+        };
+
+        ie.deinit(alloc);
     }
 
-    return try entries.toOwnedSlice(alloc);
+    return entries.toOwnedSlice(alloc);
+}
+
+pub fn hash(self: *const @This()) utils.Hash {
+    return utils.hash(&self.user_hash ++ &self.url.hash());
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

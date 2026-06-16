@@ -4,7 +4,7 @@ const zap = @import("zap");
 enabled: bool,
 regex: []const u8,
 
-pub fn parse(alloc: std.mem.Allocator, req: *const zap.Request) !?@This() {
+pub fn getFromCookie(alloc: std.mem.Allocator, req: *const zap.Request) !?@This() {
     var enabled = false;
     var regex: ?[]const u8 = null;
     defer if (regex) |r| alloc.free(r);

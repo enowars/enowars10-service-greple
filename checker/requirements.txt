@@ -2,3 +2,4 @@ enochecker3==0.14.0
 uvicorn
 gunicorn
 faker
+scikit-learn==1.9.0

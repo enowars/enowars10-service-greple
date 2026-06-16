@@ -1,12 +1,14 @@
 const Document = @import("Document.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
+const Netloc = @import("Netloc.zig");
 const std = @import("std");
 const Url = @import("Url.zig");
 const User = @import("User.zig");
+const utils = @import("utils.zig");
 
-const title_re = mvzr.compile("<title>.*?</title>").?;
-const p_re = mvzr.compile("<p>.*?</p>").?;
+const title_re = mvzr.SizedRegex(17, 1).compile("<title>.*?</title>").?;
+const p_re = mvzr.SizedRegex(9, 1).compile("<p>[^<]+</p>").?;
 
 fn setTimeout(fd: std.posix.fd_t, level: i32, optname: u32) !void {
     try std.posix.setsockopt(fd, level, optname, std.mem.asBytes(&std.posix.timeval{ .sec = 0, .usec = 1e5 }));
@@ -36,8 +38,9 @@ fn bytesToU32(bytes: [4]u8) u32 {
 fn fetch(
     alloc: std.mem.Allocator,
     url: *const Url,
+    api_key: []const u8,
     content_type: []const u8,
-) ![]const u8 {
+) ![]u8 {
     const addr = blk: {
         const list = try std.net.getAddressList(alloc, url.host, url.port);
         defer list.deinit();
@@ -47,9 +50,11 @@ fn fetch(
                 0, 255 => continue,
                 else => {},
             }
+            if (@import("builtin").is_test) break :blk a;
             switch (std.mem.bigToNative(u32, a.in.sa.addr)) {
                 bytesToU32(.{ 10, 0, 0, 0 })...bytesToU32(.{ 10, 255, 255, 255 }),
                 bytesToU32(.{ 91, 99, 0, 0 })...bytesToU32(.{ 91, 99, 255, 255 }), // TODO: remove CICD
+                bytesToU32(.{ 172, 18, 0, 1 }),
                 => {},
                 else => continue,
             }
@@ -98,8 +103,8 @@ fn fetch(
         .transfer_encoding = .none,
         .redirect_behavior = .not_allowed,
         .handle_continue = true,
-        .headers = .{},
-        .extra_headers = &.{},
+        .headers = .{ .accept_encoding = .omit },
+        .extra_headers = if (api_key.len > 0) &.{.{ .name = "X-API-Key", .value = api_key }} else &.{},
         .privileged_headers = &.{},
     };
     try request.sendBodiless();
@@ -114,47 +119,74 @@ fn fetch(
     return reader.allocRemaining(alloc, .unlimited);
 }
 
+pub const Result = struct {
+    body: []const u8,
+    index_entry: IndexEntry,
+    document: Document,
+
+    pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+        alloc.free(self.body);
+        alloc.free(self.document.text);
+        self.* = undefined;
+    }
+};
+
 pub fn crawl(
     alloc: std.mem.Allocator,
-    user: *const User,
+    user_hash: utils.Hash,
     public: bool,
-    url: []const u8,
-) !struct { IndexEntry, Document } {
-    const u: Url = try .init(url);
+    url: *const Url,
+) !Result {
+    var netloc = Netloc.getByUserUrl(alloc, user_hash, url) catch |err| switch (err) {
+        std.fs.File.OpenError.FileNotFound => null,
+        else => |leftover_err| return leftover_err,
+    };
+    defer if (netloc) |*nl| nl.deinit(alloc);
 
-    const body = fetch(alloc, &u, "text/html") catch |err| {
-        std.log.warn("Indexing failed {s} {}", .{ url, err });
+    const body = fetch(alloc, url, if (netloc) |nl| nl.api_key else "", "text/html") catch |err| {
+        std.log.warn("Indexing failed {f} {}", .{ url, err });
         return error.IndexingFailed;
     };
-    defer alloc.free(body);
+    errdefer alloc.free(body);
 
-    const title = title_re.match(body) orelse return error.IndexingFailed;
-    std.debug.assert(title.slice.len >= "<title></title>".len);
-    const d_title = try alloc.dupe(u8, title.slice["<title>".len .. title.slice.len - "</title>".len]);
-    errdefer alloc.free(d_title);
+    const title_tag = title_re.match(body) orelse return error.IndexingFailed;
+    std.debug.assert(title_tag.slice.len >= "<title></title>".len);
+    const title = title_tag.slice["<title>".len .. title_tag.slice.len - "</title>".len];
 
     var text: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (text.items) |l| alloc.free(l);
-        text.deinit(alloc);
-    }
+    defer text.deinit(alloc);
     var it = p_re.iterator(body);
-    while (it.next()) |p| {
-        std.debug.assert(p.slice.len >= "<p></p>".len);
-        if (p.slice.len == "<p></p>".len) continue;
-        const line = try alloc.dupe(u8, p.slice["<p>".len .. p.slice.len - "</p>".len]);
-        errdefer alloc.free(line);
-        try text.append(alloc, line);
+    while (it.next()) |p_tag| {
+        std.debug.assert(p_tag.slice.len > "<p></p>".len);
+        const p = body[p_tag.start + "<p>".len .. p_tag.end - "</p>".len];
+        try text.append(alloc, utils.unescape(p));
     }
     if (text.items.len == 0) return error.IndexingFailed;
 
     return .{
-        .{
+        .body = body,
+        .index_entry = .{
             .public = public,
-            .user_hash = user.hash,
-            .url = u,
-            .title = d_title,
+            .user_hash = user_hash,
+            .url = url.*,
+            .title = title,
         },
-        .{ .text = try text.toOwnedSlice(alloc) },
+        .document = .{
+            .text = try text.toOwnedSlice(alloc),
+        },
     };
+}
+
+test crawl {
+    var r = try crawl(std.testing.allocator, .{0} ** 28, true, &.{
+        .host = "example.com",
+        .port = 80,
+        .path = "/",
+    }, null);
+    defer r.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("Example Domain", r.index_entry.title);
+    const t: []const []const u8 = &.{
+        "This domain is for use in documentation examples without needing permission. Avoid use in operations.",
+    };
+    try std.testing.expectEqualDeep(t, r.document.text);
 }

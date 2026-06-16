@@ -6,6 +6,6 @@ RUN head -c64 /dev/urandom > src/secret.bin
 COPY build.zig .
 COPY build.zig.zon .
 COPY src src
-RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build -Doptimize=ReleaseSafe
+RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build -freference-trace=100
 WORKDIR /data
 CMD ["/greple/zig-out/bin/greple"]

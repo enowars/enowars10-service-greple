@@ -35,8 +35,11 @@ Greple is a web search engine that allows users to:
 | `GET` | `/console` | View registered domains |
 | `POST` | `/submit_page` | Submit a page for indexing |
 | `POST` | `/shorten_url` | Generate short URL |
+| `POST` | `/verify_host` | Verify ownership of host |
 | `GET` | `/pastebin` | View form for pastebin |
 | `POST` | `/pastebin` | Submit pastebin document |
+| `GET` | `/echo` | Echo http headers to allow checker functionality |
+| `GET` | `/r/:hash` | Refresh search index entry by fetching the origin again |
 
 ## Flagstore 0
 
