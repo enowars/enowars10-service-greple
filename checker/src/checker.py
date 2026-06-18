@@ -58,7 +58,6 @@ async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db:
     short_url = await shorten_url(client, str(_FLAG_BASE_URL.join(f"/{quote(task.flag, safe='')}")))
 
     paste_url = await paste(client, word_noise(2**4), short_url)
-
     await submit_page(client, False, str(paste_url))
 
     await db.set("username", username)
@@ -79,18 +78,18 @@ async def _getflag_short_url(task: GetflagCheckerTaskMessage, client: Client, db
 
     res = await client.get("/console")
     assert_status(res, 200)
-    paste_url = re.search(PASTE_URL_REGEX, res.text)
+    paste_url = re.search(PASTE_URL_REGEX, unescape(res.text))
     if not paste_url:
         raise MumbleException("Failed to find paste URL")
 
     res = await client.get(paste_url[0])
     assert_status(res, 200)
-    short_url_paste = re.search(SHORT_URL_REGEX, res.text)
+    short_url_paste = re.search(SHORT_URL_REGEX, unescape(res.text))
     if not short_url_paste:
         raise MumbleException("Failed to find short URL")
 
     body = await search(client, f"user:{username}")
-    short_url_search = re.search(SHORT_URL_REGEX, body)
+    short_url_search = re.search(SHORT_URL_REGEX, unescape(body))
     if not short_url_search:
         raise MumbleException("Failed to find short URL")
 
@@ -136,7 +135,6 @@ async def _put_public_document(client: Client, db: ChainDB) -> None:
     title = word_noise(2**7)
     text = word_noise(2**7)
     paste_url = await paste(client, title, text)
-
     await submit_page(client, True, str(paste_url))
 
     await db.set("username", username)
@@ -154,12 +152,12 @@ async def _get_public_document(client: Client, db: ChainDB) -> None:
         raise MumbleException("Missing putnoise data in DB") from e
 
     body = await search(client, text)
-    assert_in(title, body, "Public document not returned as result")
+    assert_in(title, unescape(body), "Public document not returned as result")
 
     body = await search(client, f"user:{username}")
-    assert_in(title, body, "Public document not returned as result")
-    assert_in(text, body, "Public document not returned as result")
-    assert_in("of <b>1</b>.", body, "Unexpected result count")
+    assert_in(title, unescape(body), "Public document not returned as result")
+    assert_in(text, unescape(body), "Public document not returned as result")
+    assert_in("of <b>1</b>.", unescape(body), "Unexpected result count")
 
     query = urlencode({"q": text, "lucky": "I'm Feeling Lucky"})
     res = await client.get(f"/search?{query}")
@@ -171,11 +169,11 @@ async def _get_public_document(client: Client, db: ChainDB) -> None:
     await set_safe_search(client, True, re_escape(word))
 
     body = await search(client, text)
-    assert_not_in(title, body, "Public document not filtered by safe search")
+    assert_not_in(title, unescape(body), "Public document not filtered by safe search")
 
     body = await search(client, f"user:{username}")
-    assert_not_in(title, body, "Public document not filtered by safe search")
-    assert_not_in(text, body, "Public document not filtered by safe search")
+    assert_not_in(title, unescape(body), "Public document not filtered by safe search")
+    assert_not_in(text, unescape(body), "Public document not filtered by safe search")
 
 
 @_CHECKER.havoc(0)
@@ -199,7 +197,7 @@ async def _exploit_sca(
     )
 
     url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
-    return unquote(url.removeprefix(str(_FLAG_BASE_URL)).strip("/"))
+    return unquote(url.removeprefix(str(_FLAG_BASE_URL)).lstrip("/"))
 
 
 def app() -> fastapi.FastAPI:

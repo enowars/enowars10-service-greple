@@ -4,7 +4,6 @@ import re
 import string
 from collections.abc import Collection
 from html import unescape
-from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 import httpx
@@ -99,8 +98,7 @@ async def set_safe_search(client: Client, enabled: bool, regex: str) -> None:
     else:
         assert_not_in("enabled", cookie, "Unexpected enabled in cookie")
     assert_in("regex", cookie, "No regex in cookie")
-    assert_equals(len(cookie["regex"]), 1, "Too many regex in cookie")
-    assert_equals(cookie["regex"][0], regex, "Unexpected regex in cookie")
+    assert_equals(cookie["regex"], [regex], "Unexpected regex in cookie")
 
     res = await client.send(res.next_request)
     assert_status(res, 200)
@@ -116,7 +114,7 @@ async def get_search_console(client: Client) -> httpx.Response:
     ):
         res = await client.get("/console")
         assert_status(res, 200)
-        return res
+    assert client.last_response is not None
     return client.last_response
 
 
@@ -143,7 +141,7 @@ async def shorten_url(client: Client, url: str) -> str:
 
     res = await client.post("/shorten_url", data={"url": url.removeprefix("http://")})
     assert_status(res, 200)
-    short_url = re.search(SHORT_URL_REGEX, res.text)
+    short_url = re.search(SHORT_URL_REGEX, unescape(res.text))
     if not short_url:
         raise MumbleException(f"Failed to find short URL")
 
@@ -198,18 +196,18 @@ async def search(client: Client, q: str) -> str:
     ):
         res = await client.get("/")
         assert_status(res, 200)
-        assert_in("Greple Search", res.text, "Missing search button")
-        assert_in('src="/logo.gif"', res.text, "Missing logo")
+        assert_in("Greple Search", unescape(res.text), "Missing search button")
+        assert_in('src="/logo.gif"', unescape(res.text), "Missing logo")
 
     query = urlencode({"q": q})
     res = await client.get(f"/search?{query}")
     assert_status(res, 200)
     assert_in(f'value="{q}"', unescape(res.text), "Unexpected form value")
-    if not re.search(r"\b[0-9]\.[0-9]{2}\b", res.text):
+    if not re.search(r"\b[0-9]\.[0-9]{2}\b", unescape(res.text)):
         raise MumbleException("Missing query timing information")
-    if not re.search(r'title="(\d+(?:\.\d+)?) ms"', res.text):
+    if not re.search(r'title="(\d+(?:\.\d+)?) ms"', unescape(res.text)):
         raise MumbleException("Missing detailed query timing information")
-    if not re.search(r"of( about)? <b>(0|[1-9][0-9]*)</b>\.", res.text):
+    if not re.search(r"of( about)? <b>(0|[1-9][0-9]*)</b>\.", unescape(res.text)):
         raise MumbleException("Missing result count number")
 
     return res.text
@@ -227,4 +225,4 @@ async def refresh(client: Client, refresh_hash: str) -> None:
     """Make a POST request to the /refresh endpoint."""
     res = await client.post("/refresh", data={"hash": refresh_hash})
     assert_status(res, 200)
-    assert_in("The page was successfully refreshed.", unescape(res.text), "Success message missing")
+    assert_in("The page was successfully refreshed.", unescape(res.text), "Missing success message")
