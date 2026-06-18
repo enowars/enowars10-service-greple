@@ -178,6 +178,11 @@ async def _get_public_document(client: Client, db: ChainDB) -> None:
     assert_not_in(text, body, "Public document not filtered by safe search")
 
 
+@_CHECKER.havoc(0)
+async def _cron(client: Client) -> None:
+    await client.get("/cron")
+
+
 @_CHECKER.exploit(0)
 async def _exploit_sca(
     logger: logging.LoggerAdapter,

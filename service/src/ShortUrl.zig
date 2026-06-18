@@ -5,8 +5,8 @@ pub const bytes = 64 / 8;
 
 url: Url,
 
-fn openDir() !std.fs.Dir {
-    return std.fs.cwd().openDir("urls", .{});
+fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    return std.fs.cwd().openDir("urls", args);
 }
 
 pub fn init(alloc: std.mem.Allocator, url: []const u8) !@This() {
@@ -14,7 +14,7 @@ pub fn init(alloc: std.mem.Allocator, url: []const u8) !@This() {
 }
 
 pub fn put(self: *const @This()) !void {
-    var dir = try openDir();
+    var dir = try openDir(.{});
     defer dir.close();
 
     const filename = &std.fmt.bytesToHex(self.hash(), .lower);
@@ -29,7 +29,7 @@ pub fn put(self: *const @This()) !void {
 }
 
 pub fn get(alloc: std.mem.Allocator, short_url_hash: [bytes]u8) !@This() {
-    var dir = try openDir();
+    var dir = try openDir(.{});
     defer dir.close();
 
     var file = try dir.openFile(&std.fmt.bytesToHex(short_url_hash, .lower), .{});
@@ -43,6 +43,18 @@ pub fn get(alloc: std.mem.Allocator, short_url_hash: [bytes]u8) !@This() {
 
 pub fn hash(self: *const @This()) [bytes]u8 {
     return self.url.hash()[0..bytes].*;
+}
+
+pub fn runCron(now: i128) !void {
+    var dir = try openDir(.{ .iterate = true });
+    defer dir.close();
+
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next()) |e| {
+        const stat = try dir.statFile(e.name);
+        if (now - stat.mtime < std.time.ns_per_hour) continue;
+        try dir.deleteFile(e.name);
+    }
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

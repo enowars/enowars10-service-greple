@@ -1,7 +1,6 @@
 const Netloc = @import("Netloc.zig");
 const std = @import("std");
 const Url = @import("Url.zig");
-const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 public: bool,
@@ -74,32 +73,43 @@ pub fn getByUserOrNetloc(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
-    var entries: std.ArrayList(@This()) = .empty;
-    defer entries.deinit(alloc);
+    var index_entries: std.ArrayList(@This()) = .empty;
+    defer index_entries.deinit(alloc);
 
     var it = dir.iterateAssumeFirstIteration();
     outer: while (try it.next()) |e| {
-        var ie = try getFromDir(alloc, dir, e.name);
-        errdefer ie.deinit(alloc);
+        var index_entry = try getFromDir(alloc, dir, e.name);
+        errdefer index_entry.deinit(alloc);
 
-        if (std.mem.eql(u8, &user_hash, &ie.user_hash)) {
-            try entries.append(alloc, ie);
+        if (std.mem.eql(u8, &user_hash, &index_entry.user_hash)) {
+            try index_entries.append(alloc, index_entry);
             continue;
         }
 
-        for (netlocs) |nl| if (std.mem.eql(u8, nl.host, ie.url.host) and nl.port == ie.url.port) {
-            try entries.append(alloc, ie);
+        for (netlocs) |nl| if (std.mem.eql(u8, nl.host, index_entry.url.host) and nl.port == index_entry.url.port) {
+            try index_entries.append(alloc, index_entry);
             continue :outer;
         };
 
-        ie.deinit(alloc);
+        index_entry.deinit(alloc);
     }
 
-    return entries.toOwnedSlice(alloc);
+    return index_entries.toOwnedSlice(alloc);
 }
 
 pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(&self.user_hash ++ &self.url.hash());
+}
+
+pub fn runCron(alloc: std.mem.Allocator, user_hash: utils.Hash) !void {
+    var dir = try openDir(.{ .iterate = true });
+    defer dir.close();
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next()) |e| {
+        var index_entry = try getFromDir(alloc, dir, e.name);
+        defer index_entry.deinit(alloc);
+        if (std.mem.eql(u8, &user_hash, &index_entry.user_hash)) try dir.deleteFile(e.name);
+    }
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

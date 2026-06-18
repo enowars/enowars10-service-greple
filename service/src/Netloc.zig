@@ -1,6 +1,5 @@
 const std = @import("std");
 const Url = @import("Url.zig");
-const User = @import("User.zig");
 const utils = @import("utils.zig");
 
 user_hash: utils.Hash,
@@ -92,21 +91,21 @@ pub fn getByUser(alloc: std.mem.Allocator, user_hash: utils.Hash) ![]const @This
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
-    var hosts: std.ArrayList(@This()) = .empty;
-    defer hosts.deinit(alloc);
+    var netlocs: std.ArrayList(@This()) = .empty;
+    defer netlocs.deinit(alloc);
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
-        var ie = try getFromDir(alloc, dir, e.name);
-        errdefer ie.deinit(alloc);
-        if (!std.mem.eql(u8, &user_hash, &ie.user_hash)) {
-            ie.deinit(alloc);
+        var netloc = try getFromDir(alloc, dir, e.name);
+        errdefer netloc.deinit(alloc);
+        if (!std.mem.eql(u8, &user_hash, &netloc.user_hash)) {
+            netloc.deinit(alloc);
             continue;
         }
-        try hosts.append(alloc, ie);
+        try netlocs.append(alloc, netloc);
     }
 
-    return hosts.toOwnedSlice(alloc);
+    return netlocs.toOwnedSlice(alloc);
 }
 
 pub fn format(self: *const @This(), writer: *std.Io.Writer) !void {
@@ -121,6 +120,18 @@ pub fn hash(self: *const @This()) utils.Hash {
     const host_hash = utils.hash(self.host);
     const port_hash = utils.hash(std.mem.asBytes(&std.mem.nativeToLittle(u16, self.port)));
     return utils.hash(&self.user_hash ++ &host_hash ++ &port_hash);
+}
+
+pub fn runCron(alloc: std.mem.Allocator, user_hash: utils.Hash) !void {
+    var dir = try openDir(.{ .iterate = true });
+    defer dir.close();
+
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next()) |e| {
+        var netloc = try getFromDir(alloc, dir, e.name);
+        defer netloc.deinit(alloc);
+        if (std.mem.eql(u8, &user_hash, &netloc.user_hash)) try dir.deleteFile(e.name);
+    }
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

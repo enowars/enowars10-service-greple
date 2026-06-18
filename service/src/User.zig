@@ -1,4 +1,7 @@
+const Document = @import("Document.zig");
+const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
+const Netloc = @import("Netloc.zig");
 const std = @import("std");
 const utils = @import("utils.zig");
 const zap = @import("zap");
@@ -8,15 +11,15 @@ pub const username_re = mvzr.SizedRegex(2, 1).compile("[\\w+-=]+").?;
 username: []const u8,
 password_hash: ?utils.Hash,
 
-fn openDir() !std.fs.Dir {
-    return std.fs.cwd().openDir("users", .{});
+fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    return std.fs.cwd().openDir("users", args);
 }
 
 pub fn put(self: *const @This()) !void {
     std.debug.assert(self.password_hash != null);
     if (self.username.len > std.math.maxInt(u16)) return error.UsernameTooLong;
 
-    var dir = try openDir();
+    var dir = try openDir(.{});
     defer dir.close();
 
     var file = try dir.createFile(&std.fmt.bytesToHex(self.hash(), .lower), .{});
@@ -30,7 +33,7 @@ pub fn put(self: *const @This()) !void {
 }
 
 pub fn get(alloc: std.mem.Allocator, user_hash: utils.Hash) !@This() {
-    var dir = try openDir();
+    var dir = try openDir(.{});
     defer dir.close();
 
     const file = try dir.openFile(&std.fmt.bytesToHex(user_hash, .lower), .{});
@@ -129,6 +132,25 @@ pub fn login(alloc: std.mem.Allocator, req: *const zap.Request, username: []cons
 
 pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(self.username);
+}
+
+pub fn runCron(alloc: std.mem.Allocator, now: i128) !void {
+    var dir = try openDir(.{ .iterate = true });
+    defer dir.close();
+
+    var it = dir.iterateAssumeFirstIteration();
+    while (try it.next()) |e| {
+        const stat = try dir.statFile(e.name);
+        if (now - stat.mtime < std.time.ns_per_hour) continue;
+
+        const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
+
+        try Document.runCron(e.name);
+        try IndexEntry.runCron(alloc, user_hash);
+        try Netloc.runCron(alloc, user_hash);
+
+        try dir.deleteFile(e.name);
+    }
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

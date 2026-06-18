@@ -302,6 +302,20 @@ fn postRefresh(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     }).interface());
 }
 
+fn getCron(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+    const now = std.time.nanoTimestamp();
+
+    try User.runCron(alloc, now);
+    try Paste.runCron(now);
+    try ShortUrl.runCron(now);
+
+    return templates.respond(alloc, req, (templates.Message{
+        .title = "Cron successful",
+        .message = "Cronjobs were successfully executed.",
+        .is_error = false,
+    }).interface());
+}
+
 const Prefix = u24;
 const prefix_bytes = @typeInfo(Prefix).int.bits / 8;
 
@@ -399,6 +413,10 @@ fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
             prefix("/refresh") => if (eqlSuffix("/refresh", path)) return switch (method) {
                 .POST => postRefresh(alloc, req),
                 else => sendMethodNotAllowed(req, "POST"),
+            },
+            prefix("/cron") => if (eqlSuffix("/cron", path)) return switch (method) {
+                .GET => getCron(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
             },
             else => {},
         };

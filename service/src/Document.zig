@@ -1,5 +1,6 @@
 const IndexEntry = @import("IndexEntry.zig");
 const std = @import("std");
+const utils = @import("utils.zig");
 
 text: []const []const u8,
 
@@ -25,6 +26,12 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     var writer = file.writer(&.{});
 
     for (self.text) |l| try writer.interface.print("{s}\n", .{l});
+}
+
+pub fn runCron(user_hash_hex: []const u8) !void {
+    var dir = try openDir();
+    defer dir.close();
+    try dir.deleteTree(user_hash_hex);
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

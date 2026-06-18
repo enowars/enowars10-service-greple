@@ -182,7 +182,7 @@ test crawl {
         .host = "example.com",
         .port = 80,
         .path = "/",
-    }, null);
+    });
     defer r.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("Example Domain", r.index_entry.title);
     const t: []const []const u8 = &.{
