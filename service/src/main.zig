@@ -1,5 +1,6 @@
 const crawl = @import("crawl.zig");
 const IndexEntry = @import("IndexEntry.zig");
+const mvzr = @import("mvzr");
 const Netloc = @import("Netloc.zig");
 const Paste = @import("Paste.zig");
 const Query = @import("Query.zig");
@@ -210,13 +211,11 @@ fn postSafeSearch(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     const regex = try req.getParamStr(alloc, "regex") orelse return error.InvalidRequest;
     defer alloc.free(regex);
 
-    var value: std.Io.Writer.Allocating = .init(alloc);
-    defer value.deinit();
-    if (enabled != null) try value.writer.writeAll("enabled=on&");
-    try value.writer.writeAll("regex=");
-    try std.Uri.Component.percentEncode(&value.writer, regex, utils.cookieValidChar);
+    try (SafeSearch{
+        .enabled = enabled != null,
+        .regex = regex,
+    }).put(alloc, req);
 
-    try req.setCookie(.{ .name = "safe_search", .value = value.written(), .secure = false });
     try req.redirectTo("/preferences", null);
 }
 
@@ -435,6 +434,7 @@ fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     route(arena_alloc, req) catch |err| {
         const safe_err = switch (err) {
             error.HostTooLong,
+            error.InvalidOrTooComplexRegex,
             error.InvalidPassword,
             error.InvalidRequest,
             error.InvalidUrl,

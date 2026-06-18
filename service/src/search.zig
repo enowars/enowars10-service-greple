@@ -1,6 +1,5 @@
 const Document = @import("Document.zig");
 const IndexEntry = @import("IndexEntry.zig");
-const mvzr = @import("mvzr");
 const Query = @import("Query.zig");
 const SafeSearch = @import("SafeSearch.zig");
 const std = @import("std");
@@ -59,10 +58,7 @@ fn aggregateResults(
     query: *const Query,
     stdout: []const u8,
 ) !utils.HashMap(Result) {
-    const regex: ?mvzr.SizedRegex(64, 2) = if (safe_search.*) |ss|
-        if (ss.enabled) .compile(ss.regex) else null
-    else
-        null;
+    const regex = if (safe_search.*) |ss| ss.compile() else null;
 
     var results: utils.HashMap(Result) = .init(alloc);
 

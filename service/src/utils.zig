@@ -53,13 +53,6 @@ test fullMatch {
     try std.testing.expect(!fullMatch(&re, "ab"));
 }
 
-pub fn setNice(nice: u32) void {
-    _ = std.os.linux.sched_setattr(0, &.{
-        .policy = @intFromEnum(std.os.linux.SCHED.Mode.NORMAL),
-        .nice = nice,
-    }, 0);
-}
-
 pub fn HashMap(V: type) type {
     return std.HashMap(Hash, V, struct {
         pub fn hash(_: @This(), k: Hash) u64 {
