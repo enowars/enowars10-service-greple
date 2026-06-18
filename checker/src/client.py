@@ -1,6 +1,7 @@
 """A http client wrapper."""
 
 import logging
+import re
 from types import TracebackType
 from typing import Self, cast
 
@@ -55,8 +56,12 @@ class Client(httpx.AsyncClient):
             self.last_response.reason_phrase,
             self.last_response.text,
         )
-        if type(exc_value) is MumbleException and exc_value.message is not None:
-            exc_value.message += f" ({self.last_response.request.method} {self.last_response.url.raw_path.decode()[:8]}\u2026)"
+        if (
+            type(exc_value) is MumbleException
+            and exc_value.message is not None
+            and (m := re.match("/[a-z_]*", self.last_response.url.raw_path.decode()))
+        ):
+            exc_value.message += f" ({self.last_response.request.method} {m[0]})"
 
     @classmethod
     def wrap(cls, client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Self:
