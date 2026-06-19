@@ -8,7 +8,7 @@ import string
 from collections.abc import Sequence
 
 with (pathlib.Path.cwd() / "words.json").open() as f:
-    _WORDS: list[str] = [x for x in json.load(f) if x.isascii() and x.isalpha() and x.islower()]
+    _WORDS: dict[str, dict[str, int]] = json.load(f)
 
 
 def _noise(alphabet: Sequence[str], sep: str, entropy: int) -> str:
@@ -28,4 +28,13 @@ def username_noise(entropy: int) -> str:
 
 def word_noise(entropy: int) -> str:
     """Generate noise consisting of space separated ASCII lowercase letter words."""
-    return _noise(_WORDS, " ", entropy)
+    e = 0.0
+    words: list[str] = []
+    while e < entropy:
+        distribution = _WORDS.get(words[-1] if words else "null", _WORDS["null"])
+        population = list(distribution)
+        weights = [distribution[x] for x in population]
+        word = random.choices(population, weights)[0]
+        words.append(word)
+        e -= math.log2(distribution[word] / sum(weights))
+    return " ".join(words)

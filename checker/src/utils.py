@@ -59,7 +59,7 @@ async def register_user(client: Client, username: str) -> None:
 
     res = await client.post(
         "/user_account",
-        data={"username": username, "password": printable_noise(2**7)},
+        data={"username": username, "password": printable_noise(128)},
     )
     assert_status(res, 302)
     if res.next_request is None:

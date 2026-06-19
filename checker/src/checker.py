@@ -52,12 +52,12 @@ def _client(client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Client:
 
 @_CHECKER.putflag(0)
 async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
-    username = username_noise(2**7)
+    username = username_noise(128)
     await register_user(client, username)
 
     short_url = await shorten_url(client, str(_FLAG_BASE_URL.join(f"/{quote(task.flag, safe='')}")))
 
-    paste_url = await paste(client, word_noise(2**4), short_url)
+    paste_url = await paste(client, word_noise(16), short_url)
     await submit_page(client, False, str(paste_url))
 
     await db.set("username", username)
@@ -101,10 +101,10 @@ async def _getflag_short_url(task: GetflagCheckerTaskMessage, client: Client, db
 
 # @_CHECKER.putflag(1)
 async def _putflag_api_key(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
-    username = username_noise(2**7)
+    username = username_noise(128)
     await register_user(client, username)
 
-    paste_url = await paste(client, word_noise(2**4), word_noise(2**4))
+    paste_url = await paste(client, word_noise(16), word_noise(16))
     await submit_page(client, True, str(paste_url))
 
     await verify_netloc(client, client.base_url.netloc.decode(), task.flag)
@@ -129,11 +129,11 @@ async def _getflag_api_key(task: GetflagCheckerTaskMessage, client: Client, db: 
 
 @_CHECKER.putnoise(0)
 async def _put_public_document(client: Client, db: ChainDB) -> None:
-    username = username_noise(2**7)
+    username = username_noise(128)
     await register_user(client, username)
 
-    title = word_noise(2**7)
-    text = word_noise(2**7)
+    title = word_noise(128)
+    text = word_noise(128)
     paste_url = await paste(client, title, text)
     await submit_page(client, True, str(paste_url))
 
