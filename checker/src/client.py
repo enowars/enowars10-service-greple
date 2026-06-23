@@ -59,7 +59,7 @@ class Client(httpx.AsyncClient):
         if (
             type(exc_value) is MumbleException
             and exc_value.message is not None
-            and (m := re.match("/[a-z_]*", self.last_response.url.raw_path.decode()))
+            and (m := re.match("/[a-z_]*/?", self.last_response.url.raw_path.decode()))
         ):
             exc_value.message += f" ({self.last_response.request.method} {m[0]})"
 
