@@ -11,7 +11,7 @@ const title_re = mvzr.SizedRegex(17, 1).compile("<title>.*?</title>").?;
 const p_re = mvzr.SizedRegex(9, 1).compile("<p>[^<]+</p>").?;
 
 fn setTimeout(fd: std.posix.fd_t, level: i32, optname: u32) !void {
-    try std.posix.setsockopt(fd, level, optname, std.mem.asBytes(&std.posix.timeval{ .sec = 0, .usec = 1e5 }));
+    try std.posix.setsockopt(fd, level, optname, std.mem.asBytes(&std.posix.timeval{ .sec = 0, .usec = 5e5 }));
 }
 
 fn connect(addr: std.net.Address) !std.net.Stream {
