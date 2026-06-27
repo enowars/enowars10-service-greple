@@ -41,6 +41,7 @@ Greple is a web search engine that allows users to:
 | `GET` | `/echo` | Echo http headers to allow checker functionality |
 | `GET` | `/r/:hash` | Refresh search index entry by fetching the origin again |
 | `GET` | `/cron` | Triggered periodically by checker to ensure regular clean up of old data |
+| `GET` | `/queue` | Show the users crawl queue, redirects to console when empty |
 
 ## Flagstore 0
 

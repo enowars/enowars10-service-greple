@@ -70,6 +70,12 @@ pub fn toStdUri(self: *const @This()) std.Uri {
     };
 }
 
+pub fn toOwned(self: *const @This(), alloc: std.mem.Allocator) !@This() {
+    const host = try alloc.dupe(u8, self.host);
+    const path = try alloc.dupe(u8, self.path);
+    return .{ .host = host, .port = self.port, .path = path };
+}
+
 pub fn formatNetloc(self: *const @This(), writer: *std.Io.Writer) !void {
     if (self.port == 80) try writer.writeAll(self.host) else try writer.print("{s}:{d}", .{ self.host, self.port });
 }

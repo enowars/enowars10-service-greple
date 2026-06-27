@@ -1,5 +1,6 @@
 """Utils for the checker."""
 
+import asyncio
 import re
 import string
 from collections.abc import Collection
@@ -129,6 +130,19 @@ async def submit_page(client: Client, public: bool, url: str) -> None:
     assert_status(res, 302)
     if res.next_request is None:
         raise MumbleException("No redirect location")
+
+    while True:
+        res = await client.send(res.next_request)
+        if res.status_code == 200:
+            assert_in(url, unescape(res.text), "Submitted URL not queue")
+            await asyncio.sleep(1)
+            res.next_request = res.request
+        elif res.status_code == 302:
+            if res.next_request is None:
+                raise MumbleException("No redirect location")
+            break
+        else:
+            raise MumbleException("Unexpected HTTP status code")
 
     res = await client.send(res.next_request)
     assert_status(res, 200)

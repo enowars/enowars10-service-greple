@@ -402,6 +402,46 @@ pub const SearchConsole = struct {
     }
 };
 
+pub const Queue = struct {
+    connection: *@import("Crawler.zig").Connection,
+
+    fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
+        try w.writeAll("Queue");
+    }
+
+    fn formatBody(self: *const anyopaque, w: *std.Io.Writer) !void {
+        const s: *const @This() = @ptrCast(@alignCast(self));
+        try w.writeAll(
+            \\<table>
+            \\  <thead>
+            \\    <tr><th>#</th><th>URL</th></tr>
+            \\  </thead>
+            \\  <tbody>
+        );
+        var it = s.connection.queue.iter();
+        var c: isize = 0;
+        while (it.next()) |i| : (c += 1) try w.print(
+            \\<tr><td>{d}</td><td>{f}</td></tr>
+        , .{ c, i.url });
+        try w.writeAll(
+            \\  </tbody>
+            \\</table>
+        );
+    }
+
+    fn format(self: *const anyopaque, w: *std.Io.Writer) !void {
+        try (Base{
+            .self = self,
+            .formatTitleFn = &formatTitle,
+            .formatBodyFn = &formatBody,
+        }).interface().format(w);
+    }
+
+    pub fn interface(self: *const @This()) Template {
+        return .{ .self = self, .formatFn = &format };
+    }
+};
+
 pub const Pastebin = struct {
     fn formatTitle(_: *const anyopaque, w: *std.Io.Writer) !void {
         try w.writeAll("Pastebin");

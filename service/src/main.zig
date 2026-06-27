@@ -1,4 +1,4 @@
-const crawl = @import("crawl.zig");
+const Crawler = @import("Crawler.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
 const Netloc = @import("Netloc.zig");
@@ -101,7 +101,7 @@ fn getSearchConsole(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     }).interface());
 }
 
-fn postSubmitPage(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+fn postSubmitPage(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
     req.parseCookies(false);
 
     var user = try User.getFromCookie(alloc, req) orelse return error.AccessDenied;
@@ -114,14 +114,9 @@ fn postSubmitPage(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     const url = try req.getParamStr(alloc, "url") orelse return error.InvalidRequest;
     defer alloc.free(url);
 
-    const u: Url = try .init(alloc, url, true);
+    try crawler.crawl(user.hash(), public != null, &try .init(alloc, url, true));
 
-    var result = try crawl.crawl(alloc, user.hash(), public != null, &u);
-    defer result.deinit(alloc);
-    try result.index_entry.put();
-    try result.document.put(&result.index_entry);
-
-    try req.redirectTo("/console", null);
+    try req.redirectTo("/queue", null);
 }
 
 fn postShortenUrl(alloc: std.mem.Allocator, req: *const zap.Request) !void {
@@ -280,7 +275,7 @@ fn getEcho(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     return templates.respond(alloc, req, (templates.Echo{ .headers = &headers }).interface());
 }
 
-fn postRefresh(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+fn postRefresh(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
     try req.parseBody();
 
     const hash = try req.getParamStr(alloc, "hash") orelse return error.InvalidRequest;
@@ -289,10 +284,7 @@ fn postRefresh(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     var index_entry: IndexEntry = try .get(alloc, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
     defer index_entry.deinit(alloc);
 
-    var result = try crawl.crawl(alloc, index_entry.user_hash, index_entry.public, &index_entry.url);
-    defer result.deinit(alloc);
-    try result.index_entry.put();
-    try result.document.put(&result.index_entry);
+    try crawler.crawl(index_entry.user_hash, index_entry.public, &index_entry.url);
 
     return templates.respond(alloc, req, (templates.Message{
         .title = "Refreshed page",
@@ -313,6 +305,22 @@ fn getCron(alloc: std.mem.Allocator, req: *const zap.Request) !void {
         .message = "Cronjobs were successfully executed.",
         .is_error = false,
     }).interface());
+}
+
+fn getQueue(alloc: std.mem.Allocator, crawler: *const Crawler, req: *const zap.Request) !void {
+    req.parseCookies(false);
+
+    var user = try User.getFromCookie(alloc, req) orelse return error.AccessDenied;
+    defer user.deinit(alloc);
+
+    const connection = crawler.connections.getPtr(user.hash()) orelse return req.redirectTo("/console", null);
+    connection.mut.lock();
+    defer connection.mut.unlock();
+
+    if (connection.queue.isEmpty()) return req.redirectTo("/console", null);
+
+    try req.setHeader("Refresh", "1");
+    return templates.respond(alloc, req, (templates.Queue{ .connection = connection }).interface());
 }
 
 const Prefix = u24;
@@ -343,7 +351,7 @@ fn sendMethodNotAllowed(req: *const zap.Request, allow: []const u8) !void {
     return req.sendBody("Method Not Allowed");
 }
 
-fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+fn route(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
     if (req.path) |path| {
         if (path.len == 1 and path[0] == '/') {
             if (req.methodAsEnum() != .GET) return sendMethodNotAllowed(req, "GET");
@@ -361,7 +369,7 @@ fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
                 else => sendMethodNotAllowed(req, "GET"),
             },
             prefix("/submit_page") => if (eqlSuffix("/submit_page", path)) return switch (method) {
-                .POST => postSubmitPage(alloc, req),
+                .POST => postSubmitPage(alloc, crawler, req),
                 else => sendMethodNotAllowed(req, "POST"),
             },
             prefix("/shorten_url") => if (eqlSuffix("/shorten_url", path)) return switch (method) {
@@ -410,11 +418,15 @@ fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
                 else => sendMethodNotAllowed(req, "GET"),
             },
             prefix("/refresh") => if (eqlSuffix("/refresh", path)) return switch (method) {
-                .POST => postRefresh(alloc, req),
+                .POST => postRefresh(alloc, crawler, req),
                 else => sendMethodNotAllowed(req, "POST"),
             },
             prefix("/cron") => if (eqlSuffix("/cron", path)) return switch (method) {
                 .GET => getCron(alloc, req),
+                else => sendMethodNotAllowed(req, "GET"),
+            },
+            prefix("/queue") => if (eqlSuffix("/queue", path)) return switch (method) {
+                .GET => getQueue(alloc, crawler, req),
                 else => sendMethodNotAllowed(req, "GET"),
             },
             else => {},
@@ -426,12 +438,12 @@ fn route(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     try req.sendBody("Not Found");
 }
 
-fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
+fn handleRequest(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
     var arena: std.heap.ArenaAllocator = .init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    route(arena_alloc, req) catch |err| {
+    route(arena_alloc, crawler, req) catch |err| {
         const safe_err = switch (err) {
             error.HostTooLong,
             error.InvalidOrTooComplexRegex,
@@ -453,11 +465,6 @@ fn handleRequest(alloc: std.mem.Allocator, req: *const zap.Request) !void {
             => |forbidden_err| blk: {
                 req.setStatus(.forbidden);
                 break :blk forbidden_err;
-            },
-            error.IndexingFailed,
-            => |internal_err| blk: {
-                req.setStatus(.internal_server_error);
-                break :blk internal_err;
             },
             else => blk: {
                 req.setStatus(.internal_server_error);
@@ -502,16 +509,18 @@ pub fn main() !void {
 
     const Handler = struct {
         var alloc: std.mem.Allocator = undefined;
+        var crawler: Crawler = undefined;
         fn innerHandleRequest(req: zap.Request) !void {
-            try handleRequest(alloc, &req);
+            try handleRequest(alloc, &crawler, &req);
         }
     };
     Handler.alloc = gpa.allocator();
+    Handler.crawler = .init(Handler.alloc);
+    defer Handler.crawler.deinit();
 
     var listener: zap.HttpListener = .init(.{
         .port = utils.port,
         .on_request = Handler.innerHandleRequest,
-        .max_clients = 1_000_000,
     });
     try listener.listen();
     zap.start(.{ .workers = 2, .threads = 8 });

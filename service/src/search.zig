@@ -72,11 +72,7 @@ fn aggregateResults(
         const filename = split.next() orelse return error.UnexpectedGrepStdout;
         const text = split.rest();
 
-        if (regex) |*r| {
-            // utils.setNice(18);
-            // defer utils.setNice(0);
-            if (r.isMatch(text)) continue;
-        }
+        if (regex) |*r| if (r.isMatch(text)) continue;
 
         const user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
         const url_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
