@@ -297,12 +297,14 @@ fn postRefresh(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Requ
     try req.redirectTo("/queue", null);
 }
 
-fn getCron(alloc: std.mem.Allocator, req: *const zap.Request) !void {
-    const now = std.time.nanoTimestamp();
-
-    try User.runCron(alloc, now);
-    try Paste.runCron(now);
-    try ShortUrl.runCron(now);
+fn getCron(alloc: std.mem.Allocator, mut: *std.Thread.Mutex, req: *const zap.Request) !void {
+    if (mut.tryLock()) {
+        defer mut.unlock();
+        const now = std.time.nanoTimestamp();
+        try User.runCron(alloc, now);
+        try Paste.runCron(now);
+        try ShortUrl.runCron(now);
+    }
 
     return templates.respond(alloc, req, (templates.Message{
         .title = "Cron successful",
@@ -380,7 +382,7 @@ fn sendMethodNotAllowed(req: *const zap.Request, allow: []const u8) !void {
     return req.sendBody("Method Not Allowed");
 }
 
-fn route(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
+fn route(alloc: std.mem.Allocator, crawler: *Crawler, mut: *std.Thread.Mutex, req: *const zap.Request) !void {
     if (req.path) |path| {
         if (path.len == 1 and path[0] == '/') {
             if (req.methodAsEnum() != .GET) return sendMethodNotAllowed(req, "GET");
@@ -447,7 +449,7 @@ fn route(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !
                 else => sendMethodNotAllowed(req, "POST"),
             },
             prefix("/cron") => if (eqlSuffix("/cron", path)) return switch (method) {
-                .GET => getCron(alloc, req),
+                .GET => getCron(alloc, mut, req),
                 else => sendMethodNotAllowed(req, "GET"),
             },
             prefix("/queue") => if (eqlSuffix("/queue", path)) return switch (method) {
@@ -467,12 +469,17 @@ fn route(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !
     try req.sendBody("Not Found");
 }
 
-fn handleRequest(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
+fn handleRequest(
+    alloc: std.mem.Allocator,
+    crawler: *Crawler,
+    mut: *std.Thread.Mutex,
+    req: *const zap.Request,
+) !void {
     var arena: std.heap.ArenaAllocator = .init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    route(arena_alloc, crawler, req) catch |err| {
+    route(arena_alloc, crawler, mut, req) catch |err| {
         std.log.info("{s} {s} {}", .{ req.method.?, req.path.?, err });
 
         const safe_err = switch (err) {
@@ -540,8 +547,9 @@ pub fn main() !void {
     const Handler = struct {
         var alloc: std.mem.Allocator = undefined;
         var crawler: Crawler = undefined;
+        var mut: std.Thread.Mutex = .{};
         fn innerHandleRequest(req: zap.Request) !void {
-            try handleRequest(alloc, &crawler, &req);
+            try handleRequest(alloc, &crawler, &mut, &req);
         }
     };
     Handler.alloc = gpa.allocator();
