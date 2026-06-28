@@ -2,19 +2,9 @@ services:
   greple:
     build: .
     ports:
-      - "7777:7777"
+      - "7770-7778:7770-7778"
     volumes:
       - ./data:/data
     restart: unless-stopped
-    cpus: 1
-    mem_limit: 1G
-  echo:
-    build:
-      context: .
-      dockerfile: Dockerfile.echo
-    ports:
-      - "7770-7776:7770-7776"
-      - "7778:7778"
-    restart: unless-stopped
-    cpus: 1
-    mem_limit: 1G
+    cpus: 2
+    mem_limit: 2G
