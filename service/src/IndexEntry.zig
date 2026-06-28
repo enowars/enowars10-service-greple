@@ -86,7 +86,7 @@ pub fn getByUserOrNetloc(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc
             continue;
         }
 
-        for (netlocs) |nl| if (std.mem.eql(u8, nl.host, index_entry.url.host) and nl.port == index_entry.url.port) {
+        for (netlocs) |nl| if (nl.verified and std.mem.eql(u8, nl.host, index_entry.url.host) and nl.port == index_entry.url.port) {
             try index_entries.append(alloc, index_entry);
             continue :outer;
         };

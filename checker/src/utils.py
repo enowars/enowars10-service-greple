@@ -135,7 +135,7 @@ async def submit_page(client: Client, public: bool, url: str) -> None:
         res = await client.send(res.next_request)
         if res.status_code == 200:
             assert_in(url, unescape(res.text), "Submitted URL not queue")
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
             res.next_request = res.request
         elif res.status_code == 302:
             if res.next_request is None:
