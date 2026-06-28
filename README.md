@@ -7,10 +7,11 @@ A minimalist search engine service written in [Zig](https://ziglang.org/) using 
 Greple is a web search engine that allows users to:
 - Search indexed web pages using keyword queries
 - Create user accounts for authentication
-- Register domains they own via the Search Console
+- Verify netlocs they own via the Search Console
 - Submit pages for indexing (public or private)
 - Shorten URLs for registered domains
 - Configure safe search preferences with custom regex filtering
+- Post things to a pastebin
 
 ## Architecture
 
@@ -35,13 +36,13 @@ Greple is a web search engine that allows users to:
 | `GET` | `/console` | View registered domains |
 | `POST` | `/submit_page` | Submit a page for indexing |
 | `POST` | `/shorten_url` | Generate short URL |
-| `POST` | `/verify_host` | Verify ownership of host |
+| `POST` | `/verify_netloc` | Submit netloc for ownership verification |
 | `GET` | `/pastebin` | View form for pastebin |
 | `POST` | `/pastebin` | Submit pastebin document |
-| `GET` | `/echo` | Echo http headers to allow checker functionality |
 | `GET` | `/r/:hash` | Refresh search index entry by fetching the origin again |
 | `GET` | `/cron` | Triggered periodically by checker to ensure regular clean up of old data |
 | `GET` | `/queue` | Show the users crawl queue, redirects to console when empty |
+| `POST` | `/token` | Verify token for netloc ownership |
 
 ## Flagstore 0
 

@@ -1,7 +1,6 @@
 const mvzr = @import("mvzr");
 const std = @import("std");
 
-pub const port = 7777;
 const key = @embedFile("secret.bin");
 const HashFn = std.crypto.hash.sha2.Sha224;
 const HmacFn = std.crypto.auth.hmac.Hmac(HashFn);

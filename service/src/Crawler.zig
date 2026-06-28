@@ -6,10 +6,13 @@ const Url = @import("Url.zig");
 const utils = @import("utils.zig");
 const zap = @import("zap");
 
-const Queue = @import("queue.zig").Queue(struct {
-    user_hash: utils.Hash,
-    public: bool,
-    url: Url,
+const Queue = @import("queue.zig").Queue(union(enum) {
+    crawl: struct {
+        user_hash: utils.Hash,
+        public: bool,
+        url: Url,
+    },
+    verify: struct { url: Url },
 }, 4);
 
 const title_re = mvzr.SizedRegex(17, 1).compile("<title>.*?</title>").?;
@@ -148,14 +151,20 @@ pub const Connection = struct {
         };
     }
 
+    fn getUrl(self: *@This()) *Url {
+        return switch (self.queue.get().*) {
+            inline else => |*i| &i.url,
+        };
+    }
+
     fn onError(self: *@This(), err: anyerror) void {
-        std.log.warn("{f} ({f}): {}", .{ self.queue.get().url, self.conn.?.addr, err });
-        self.queue.get().url.deinit(self.alloc);
+        std.log.warn("{f} ({f}): {}", .{ self.getUrl(), self.conn.?.addr, err });
+        self.getUrl().deinit(self.alloc);
         self.queue.consume();
         if (!self.queue.isEmpty()) self.next();
     }
 
-    fn fetch(self: *@This(), user_hash: utils.Hash, public: bool, url: *const Url) !void {
+    pub fn crawl(self: *@This(), user_hash: utils.Hash, public: bool, url: *const Url) !void {
         self.mut.lock();
         defer self.mut.unlock();
 
@@ -163,12 +172,24 @@ pub const Connection = struct {
         errdefer u.deinit(self.alloc);
 
         const was_empty = self.queue.isEmpty();
-        try self.queue.put(.{ .user_hash = user_hash, .public = public, .url = u });
+        try self.queue.put(.{ .crawl = .{ .user_hash = user_hash, .public = public, .url = u } });
+        if (was_empty) self.next();
+    }
+
+    pub fn verify(self: *@This(), url: *const Url) !void {
+        self.mut.lock();
+        defer self.mut.unlock();
+
+        var u = try url.toOwned(self.alloc);
+        errdefer u.deinit(self.alloc);
+
+        const was_empty = self.queue.isEmpty();
+        try self.queue.put(.{ .verify = .{ .url = u } });
         if (was_empty) self.next();
     }
 
     fn next(self: *@This()) void {
-        const url = &self.queue.get().url;
+        const url = self.getUrl();
 
         const address_list = std.net.getAddressList(
             self.alloc,
@@ -251,8 +272,8 @@ pub const Connection = struct {
         std.debug.assert(self.request == null);
         std.debug.assert(!self.queue.isEmpty());
 
-        std.log.warn("{f} ({f}): error.ConnectionFailed", .{ self.queue.get().url, self.conn.?.addr });
-        self.queue.get().url.deinit(self.alloc);
+        std.log.warn("{f} ({f}): error.ConnectionFailed", .{ self.getUrl(), self.conn.?.addr });
+        self.getUrl().deinit(self.alloc);
         self.queue.consume();
         self.conn = null;
         if (!self.queue.isEmpty()) self.next();
@@ -265,44 +286,48 @@ pub const Connection = struct {
         std.debug.assert(self.request != null);
         std.debug.assert(!self.queue.isEmpty());
 
-        const item = self.queue.get();
         std.log.info("{f} ({f}): {d} {s}", .{
-            item.url,
+            self.getUrl(),
             self.conn.?.addr,
             response.status,
             zap.util.fio2str(response.status_str) orelse "",
         });
 
-        if (response.status != 200) return self.onError(error.StatusNot200Ok);
+        switch (self.queue.get().*) {
+            .crawl => |item| {
+                if (response.status != 200) return self.onError(error.StatusNot200Ok);
 
-        const x = zap.fio.fiobj_obj2cstr(response.body);
-        const body = x.data[0..x.len];
+                const x = zap.fio.fiobj_obj2cstr(response.body);
+                const body = x.data[0..x.len];
 
-        const title_tag = title_re.match(body) orelse return self.onError(error.NoTitle);
-        const title = title_tag.slice["<title>".len .. title_tag.slice.len - "</title>".len];
+                const title_tag = title_re.match(body) orelse return self.onError(error.NoTitle);
+                const title = title_tag.slice["<title>".len .. title_tag.slice.len - "</title>".len];
 
-        var text: std.ArrayList([]const u8) = .empty;
-        defer text.deinit(self.alloc);
-        var it = p_re.iterator(body);
-        while (it.next()) |p_tag| {
-            std.debug.assert(p_tag.slice.len > "<p></p>".len);
-            const p = body[p_tag.start + "<p>".len .. p_tag.end - "</p>".len];
-            text.append(self.alloc, utils.unescape(p)) catch |err| return self.onError(err);
+                var text: std.ArrayList([]const u8) = .empty;
+                defer text.deinit(self.alloc);
+                var it = p_re.iterator(body);
+                while (it.next()) |p_tag| {
+                    std.debug.assert(p_tag.slice.len > "<p></p>".len);
+                    const p = body[p_tag.start + "<p>".len .. p_tag.end - "</p>".len];
+                    text.append(self.alloc, utils.unescape(p)) catch |err| return self.onError(err);
+                }
+                if (text.items.len == 0) return self.onError(error.NoText);
+
+                const index_entry: IndexEntry = .{
+                    .public = item.public,
+                    .user_hash = item.user_hash,
+                    .url = item.url,
+                    .title = title,
+                };
+                index_entry.put() catch |err| return self.onError(err);
+                (Document{
+                    .text = text.items,
+                }).put(&index_entry) catch |err| return self.onError(err);
+            },
+            .verify => {},
         }
-        if (text.items.len == 0) return self.onError(error.NoText);
 
-        const index_entry: IndexEntry = .{
-            .public = item.public,
-            .user_hash = item.user_hash,
-            .url = item.url,
-            .title = title,
-        };
-        index_entry.put() catch |err| return self.onError(err);
-        (Document{
-            .text = text.items,
-        }).put(&index_entry) catch |err| return self.onError(err);
-
-        item.url.deinit(self.alloc);
+        self.getUrl().deinit(self.alloc);
         self.queue.consume();
         if (!self.queue.isEmpty()) self.next();
     }
@@ -313,7 +338,7 @@ pub const Connection = struct {
         self.request.?.private_data.out_headers = zap.fio.fiobj_hash_new();
         self.request.?.headers = zap.fio.fiobj_hash_new();
 
-        const url = &self.queue.get().url;
+        const url = self.getUrl();
         var host: std.Io.Writer.Allocating = .init(self.alloc);
         defer host.deinit();
         url.formatNetloc(&host.writer) catch |err| return self.onError(err);
@@ -343,17 +368,10 @@ pub fn init(alloc: std.mem.Allocator) @This() {
     };
 }
 
-pub fn crawl(
-    self: *@This(),
-    user_hash: utils.Hash,
-    public: bool,
-    url: *const Url,
-) !void {
-    self.mut.lock();
-    defer self.mut.unlock();
-    const connection = try self.connections.getOrPut(user_hash);
-    if (!connection.found_existing) connection.value_ptr.* = .init(self.alloc);
-    try connection.value_ptr.fetch(user_hash, public, url);
+pub fn get(self: *@This(), user_hash: utils.Hash) !*Connection {
+    const result = try self.connections.getOrPut(user_hash);
+    if (!result.found_existing) result.value_ptr.* = .init(self.alloc);
+    return result.value_ptr;
 }
 
 pub fn deinit(self: *@This()) void {

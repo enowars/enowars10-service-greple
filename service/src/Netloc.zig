@@ -2,28 +2,24 @@ const std = @import("std");
 const Url = @import("Url.zig");
 const utils = @import("utils.zig");
 
+verified: bool,
 user_hash: utils.Hash,
 host: []const u8,
 port: u16,
 api_key: []const u8,
-
-pub fn fromUrl(user_hash: utils.Hash, url: *const Url, api_key: []const u8) !@This() {
-    // TODO: disallow own port
-    // if (url.port == utils.port) return error.InvalidHost;
-    return .{
-        .user_hash = user_hash,
-        .host = url.host,
-        .port = url.port,
-        .api_key = api_key,
-    };
-}
 
 pub fn init(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc: []const u8, api_key: []const u8) !@This() {
     const url = Url.init(alloc, netloc, false) catch |err| switch (err) {
         error.InvalidUrl => return error.InvalidHost,
         else => |leftover_err| return leftover_err,
     };
-    return try fromUrl(user_hash, &url, api_key);
+    return .{
+        .verified = false,
+        .user_hash = user_hash,
+        .host = url.host,
+        .port = url.port,
+        .api_key = api_key,
+    };
 }
 
 fn openDir(args: std.fs.Dir.OpenOptions) !std.fs.Dir {
@@ -42,6 +38,7 @@ pub fn put(self: *const @This()) !void {
 
     var writer = file.writer(&.{});
 
+    try writer.interface.writeByte(@intFromBool(self.verified));
     try writer.interface.writeAll(&self.user_hash);
     try writer.interface.writeInt(u16, @truncate(self.host.len), .little);
     try writer.interface.writeAll(self.host);
@@ -54,9 +51,10 @@ fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !
     const file = try dir.openFile(filename, .{});
     defer file.close();
 
-    var buffer: [@max(@sizeOf(utils.Hash), @sizeOf(u16))]u8 = undefined;
+    var buffer: [@max(1, @sizeOf(utils.Hash), @sizeOf(u16))]u8 = undefined;
     var reader = file.reader(&buffer);
 
+    const verified = try reader.interface.takeByte() == @intFromBool(true);
     const user_hash = (try reader.interface.takeArray(@sizeOf(utils.Hash))).*;
     const host = try reader.interface.readAlloc(alloc, try reader.interface.takeInt(u16, .little));
     errdefer alloc.free(host);
@@ -65,6 +63,7 @@ fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !
     errdefer alloc.free(api_key);
 
     return .{
+        .verified = verified,
         .user_hash = user_hash,
         .host = host,
         .port = port,
@@ -80,6 +79,7 @@ pub fn get(alloc: std.mem.Allocator, netloc_hash: utils.Hash) !@This() {
 
 pub fn getByUserUrl(alloc: std.mem.Allocator, user_hash: utils.Hash, url: *const Url) !@This() {
     return get(alloc, (@This(){
+        .verified = false,
         .user_hash = user_hash,
         .host = url.host,
         .port = url.port,
@@ -120,6 +120,14 @@ pub fn hash(self: *const @This()) utils.Hash {
     const host_hash = utils.hash(self.host);
     const port_hash = utils.hash(std.mem.asBytes(&std.mem.nativeToLittle(u16, self.port)));
     return utils.hash(&self.user_hash ++ &host_hash ++ &port_hash);
+}
+
+pub fn verificationToken(self: *const @This(), alloc: std.mem.Allocator, prefix: []const u8) ![2 * @sizeOf(utils.Hmac)]u8 {
+    var inp: std.Io.Writer.Allocating = .init(alloc);
+    defer inp.deinit();
+    try inp.writer.writeAll(prefix);
+    try self.format(&inp.writer);
+    return std.fmt.bytesToHex(utils.hmac(inp.written()), .lower);
 }
 
 pub fn runCron(alloc: std.mem.Allocator, user_hash: utils.Hash) !void {

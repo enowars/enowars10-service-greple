@@ -1,4 +1,5 @@
 const std = @import("std");
+const Url = @import("Url.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
 const zap = @import("zap");
@@ -367,17 +368,28 @@ pub const SearchConsole = struct {
             \\  </thead>
             \\  <tbody>
         );
-        for (s.netlocs) |nl| try w.print(
-            \\<tr><td>{f}</td><td>{f}</td></tr>
-        , .{
-            nl,
-            Escape{ .string = nl.api_key },
-        });
+        for (s.netlocs, 0..) |nl, i| {
+            try w.print(
+                \\<tr><td>{f}</td><td>{f}</td></tr>
+            , .{ nl, Escape{ .string = nl.api_key } });
+            if (!nl.verified) {
+                try w.print(
+                    \\<tr><td colspan="2">
+                    \\  <form action="/token" method="POST">
+                    \\    <input type="hidden" name="hash" value="{s}">
+                    \\    <label for="netloc_{d}_token">Token:</label>
+                    \\    <input id="netloc_{d}_token" name="token" size="32">
+                    \\    <input type="submit" value="Verify">
+                    \\  </form>
+                    \\</td></tr>
+                , .{ std.fmt.bytesToHex(nl.hash(), .lower), i, i });
+            }
+        }
         try w.writeAll(
             \\  </tbody>
             \\</table>
             \\<a name="verify_netloc">Verify Netloc</a>
-            \\<p>Verify the ownership of a netloc (host:port) by entering a token received in the X-Token HTTP header. You can set an API key that will be send to pages you submit with the netloc as X-API-Key.</p>
+            \\<p>Verify the ownership of a netloc (host:port) by entering a token received in a GET request to <code>/.verify?token=&hellip;</code>. Extract the token from your access logs to complete the verification. You can set an API key that will be used with pages you submit for the netloc.</p>
             \\<form action="/verify_netloc" method="POST" class="form">
             \\  <label for="verify_netloc_netloc">Netloc:</label>
             \\  <input id="verify_netloc_netloc" name="netloc" size="32">
@@ -422,7 +434,9 @@ pub const Queue = struct {
         var c: isize = 0;
         while (it.next()) |i| : (c += 1) try w.print(
             \\<tr><td>{d}</td><td>{f}</td></tr>
-        , .{ c, i.url });
+        , .{ c, switch (i.*) {
+            inline else => |x| x.url,
+        } });
         try w.writeAll(
             \\  </tbody>
             \\</table>

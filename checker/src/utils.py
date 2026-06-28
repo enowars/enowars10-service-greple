@@ -157,12 +157,12 @@ async def shorten_url(client: Client, url: str) -> str:
     assert_status(res, 200)
     short_url = re.search(SHORT_URL_REGEX, unescape(res.text))
     if not short_url:
-        raise MumbleException(f"Failed to find short URL")
+        raise MumbleException("Failed to find short URL")
 
     return short_url[0]
 
 
-async def verify_netloc(client: Client, netloc: str, api_key: str) -> None:
+async def verify_netloc(client: Client, netloc: str, api_key: str) -> str:
     """Verify a netloc."""
     await get_search_console(client)
 
@@ -173,8 +173,29 @@ async def verify_netloc(client: Client, netloc: str, api_key: str) -> None:
 
     res = await client.send(res.next_request)
     assert_status(res, 200)
-    assert_in(netloc, unescape(res.text), "Verified netloc not in table")
+    assert_in(netloc, unescape(res.text), "Netloc not in table")
     assert_in(api_key, unescape(res.text), "Netlocs API key not in table")
+    netloc_hash = re.search('value="([0-9a-f]{56})"', unescape(res.text))
+    if not netloc_hash:
+        raise MumbleException("Failed to find netloc hash")
+
+    return netloc_hash[1]
+
+
+async def token(client: Client, netloc_hash: str, token: str) -> str:
+    """Provide token to complete verification of netloc."""
+    await get_search_console(client)
+
+    res = await client.post("/token", data={"hash": netloc_hash, "token": token})
+    assert_status(res, 302)
+    if res.next_request is None:
+        raise MumbleException("No redirect location")
+
+    res = await client.send(res.next_request)
+    assert_status(res, 200)
+    assert_not_in(netloc_hash, unescape(res.text), "Netloc not verified")
+
+    return res.text
 
 
 async def paste(client: Client, title: str, text: str) -> httpx.URL:
