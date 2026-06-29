@@ -1,6 +1,7 @@
 const Document = @import("Document.zig");
 const IndexEntry = @import("IndexEntry.zig");
 const mvzr = @import("mvzr");
+const Netloc = @import("Netloc.zig");
 const std = @import("std");
 const Url = @import("Url.zig");
 const utils = @import("utils.zig");
@@ -159,18 +160,18 @@ pub const Connection = struct {
         std.log.warn("{f} ({f}): {}", .{ self.getUrl(), self.conn.?.addr, err });
         self.getUrl().deinit(self.alloc);
         self.queue.consume();
-        if (!self.queue.isEmpty()) self.next();
+        self.next();
     }
 
     pub fn crawl(self: *@This(), user_hash: utils.Hash, public: bool, url: *const Url) !void {
         self.mut.lock();
         defer self.mut.unlock();
 
-        var u = try url.toOwned(self.alloc);
-        errdefer u.deinit(self.alloc);
+        var owned_url = try url.toOwned(self.alloc);
+        errdefer owned_url.deinit(self.alloc);
 
         const was_empty = self.queue.isEmpty();
-        try self.queue.put(.{ .crawl = .{ .user_hash = user_hash, .public = public, .url = u } });
+        try self.queue.put(.{ .crawl = .{ .user_hash = user_hash, .public = public, .url = owned_url } });
         if (was_empty) self.next();
     }
 
@@ -187,6 +188,16 @@ pub const Connection = struct {
     }
 
     fn next(self: *@This()) void {
+        if (self.queue.isEmpty()) {
+            // TODO: free memory
+            self.request = null;
+            if (self.conn) |c| {
+                fio_close(c.uuid);
+                self.conn = null;
+            }
+            return;
+        }
+
         const url = self.getUrl();
 
         const address_list = std.net.getAddressList(
@@ -199,7 +210,7 @@ pub const Connection = struct {
         if (self.conn) |c| {
             for (address_list.addrs) |b| if (c.addr.eql(b)) return self.sendRequest();
 
-            // TODO: destroy http1
+            // TODO: destroy http1?
             self.request = null;
             fio_close(c.uuid);
             self.conn = null;
@@ -238,28 +249,6 @@ pub const Connection = struct {
         std.debug.assert(!self.queue.isEmpty());
 
         self.http_settings.udata = self;
-        self.request = @ptrCast(@alignCast(fio_malloc(@sizeOf(zap.fio.http_s)) orelse
-            return self.onError(error.RequestAllocFailed)));
-        self.request.?.* = .{
-            .private_data = .{
-                .vtbl = http1_vtable(),
-                .flag = @intFromPtr(http1_new(self.conn.?.uuid, &self.http_settings, null, 0).?),
-                .out_headers = 0,
-            },
-            .received_at = .{ .tv_sec = 0, .tv_nsec = 0 },
-            .method = 0,
-            .status_str = 0,
-            .version = 0,
-            .path = 0,
-            .query = 0,
-            .headers = 0,
-            .cookies = 0,
-            .params = 0,
-            .body = 0,
-            .status = 0,
-            .udata = null,
-        };
-
         self.sendRequest();
     }
 
@@ -274,7 +263,7 @@ pub const Connection = struct {
         self.getUrl().deinit(self.alloc);
         self.queue.consume();
         self.conn = null;
-        if (!self.queue.isEmpty()) self.next();
+        self.next();
     }
 
     fn onResponse(self: *@This(), response: *const zap.fio.http_s) void {
@@ -283,13 +272,6 @@ pub const Connection = struct {
         std.debug.assert(self.conn != null);
         std.debug.assert(self.request != null);
         std.debug.assert(!self.queue.isEmpty());
-
-        std.log.info("{f} ({f}): {d} {s}", .{
-            self.getUrl(),
-            self.conn.?.addr,
-            response.status,
-            zap.util.fio2str(response.status_str) orelse "",
-        });
 
         switch (self.queue.get().*) {
             .crawl => |item| {
@@ -327,12 +309,33 @@ pub const Connection = struct {
 
         self.getUrl().deinit(self.alloc);
         self.queue.consume();
-        if (!self.queue.isEmpty()) self.next();
+        self.next();
     }
 
     fn sendRequest(self: *@This()) void {
-        std.debug.assert(self.request != null);
+        self.request = @ptrCast(@alignCast(fio_malloc(@sizeOf(zap.fio.http_s)) orelse
+            return self.onError(error.RequestAllocFailed)));
+        self.request.?.* = .{
+            .private_data = .{
+                .vtbl = http1_vtable(),
+                .flag = @intFromPtr(http1_new(self.conn.?.uuid, &self.http_settings, null, 0).?),
+                .out_headers = 0,
+            },
+            .received_at = .{ .tv_sec = 0, .tv_nsec = 0 },
+            .method = 0,
+            .status_str = 0,
+            .version = 0,
+            .path = 0,
+            .query = 0,
+            .headers = 0,
+            .cookies = 0,
+            .params = 0,
+            .body = 0,
+            .status = 0,
+            .udata = null,
+        };
 
+        // TODO: move up
         self.request.?.private_data.out_headers = zap.fio.fiobj_hash_new();
         self.request.?.headers = zap.fio.fiobj_hash_new();
 
@@ -349,30 +352,58 @@ pub const Connection = struct {
             zap.util.str2fio(host.written()),
         ) < 0) return self.onError(error.FailedToSetHostHeader);
 
+        switch (self.queue.get().*) {
+            .crawl => |c| blk: {
+                var netloc = Netloc.getByUserUrl(self.alloc, c.user_hash, &c.url) catch |err| switch (err) {
+                    std.fs.File.OpenError.FileNotFound => break :blk,
+                    else => |leftover_err| return self.onError(leftover_err),
+                };
+                defer netloc.deinit(self.alloc);
+                if (zap.fio.http_set_header2(
+                    self.request.?,
+                    zap.util.str2fio("X-API-Key"),
+                    zap.util.str2fio(netloc.api_key),
+                ) < 0) return self.onError(error.FailedToSetApiKey);
+            },
+            else => {},
+        }
+
         // TODO: don't use, as it sends date and last-modified on a request???
         zap.fio.http_finish(self.request.?);
     }
 };
 
-alloc: std.mem.Allocator,
 mut: std.Thread.Mutex,
-connections: utils.HashMap(Connection),
+pool: std.heap.MemoryPool(Connection),
+map: utils.HashMap(*Connection),
 
 pub fn init(alloc: std.mem.Allocator) @This() {
     return .{
-        .alloc = alloc,
         .mut = .{},
-        .connections = .init(alloc),
+        .pool = .init(alloc),
+        .map = .init(alloc),
     };
 }
 
-pub fn get(self: *@This(), user_hash: utils.Hash) !*Connection {
-    const result = try self.connections.getOrPut(user_hash);
-    if (!result.found_existing) result.value_ptr.* = .init(self.alloc);
-    return result.value_ptr;
+pub fn get(self: *@This(), user_hash: utils.Hash) ?*Connection {
+    self.mut.lock();
+    defer self.mut.unlock();
+    return self.map.get(user_hash);
+}
+
+pub fn getOrPut(self: *@This(), user_hash: utils.Hash) !*Connection {
+    self.mut.lock();
+    defer self.mut.unlock();
+    const result = try self.map.getOrPut(user_hash);
+    if (!result.found_existing) {
+        result.value_ptr.* = try self.pool.create();
+        result.value_ptr.*.* = .init(self.map.allocator);
+    }
+    return result.value_ptr.*;
 }
 
 pub fn deinit(self: *@This()) void {
-    self.connections.deinit();
+    self.map.deinit();
+    self.pool.deinit();
     self.* = undefined;
 }

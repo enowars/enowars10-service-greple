@@ -5,10 +5,20 @@ import collections
 import datetime
 import html
 import itertools
+import typing
 
 from aiohttp import web
 
-_requests: collections.deque[tuple[float, web.BaseRequest]] = collections.deque()
+
+class _LoggedRequest(typing.NamedTuple):
+    timestamp: float
+    method: str
+    raw_path: str
+    headers: list[tuple[str, str]]
+    body: bytes
+
+
+_requests: collections.deque[_LoggedRequest] = collections.deque()
 
 
 def _hexdump(data: bytes) -> str:
@@ -20,20 +30,33 @@ def _hexdump(data: bytes) -> str:
     return "\n".join(line(b) for b in itertools.batched(data, 16))
 
 
-async def _fmt_row(timestamp: float, request: web.BaseRequest) -> str:
+def _fmt_row(entry: _LoggedRequest) -> str:
     return (
-        f"<tr><td>{timestamp:.4f}</td>"
-        f"<td>{html.escape(request.method)}</td>"
-        f"<td>{html.escape(request.raw_path)}</td>"
-        f"<td><details><summary>Headers</summary><pre>{html.escape('\n'.join(f'{k}: {v}' for k, v in request.headers.items() if k.lower() != 'cookie'))}</pre></details>"
-        f"<details><summary>Content</summary><pre>{html.escape(_hexdump(await request.read()))}</pre></details></td></tr>"
+        f"<tr><td>{entry.timestamp:.4f}</td>"
+        f"<td>{html.escape(entry.method)}</td>"
+        f"<td>{html.escape(entry.raw_path)}</td>"
+        f"<td><details><summary>Headers</summary><pre>{html.escape('\n'.join(f'{k}: {v}' for k, v in entry.headers))}</pre></details>"
+        f"<details><summary>Content</summary><pre>{html.escape(_hexdump(entry.body))}</pre></details></td></tr>"
     )
 
 
 async def _logger(request: web.BaseRequest) -> web.Response:
     now = datetime.datetime.now(tz=datetime.UTC).timestamp()
-    _requests.append((now, request))
-    while _requests and _requests[0][0] < now - 20:
+    _requests.append(
+        _LoggedRequest(
+            timestamp=now,
+            method=request.method,
+            raw_path=request.raw_path,
+            headers=[
+                (k, v)
+                for k, v in request.headers.items()
+                if k.lower() != "cookie"
+                if k.lower() != "x-api-key" or v.startswith("public")
+            ],
+            body=await request.read(),
+        ),
+    )
+    while _requests and _requests[0].timestamp < now - 20:
         _requests.popleft()
 
     if request.path == "/":
@@ -59,7 +82,7 @@ async def _logger(request: web.BaseRequest) -> web.Response:
         <thead>
             <tr><th>UNIX Timestamp</th><th>Method</th><th>Path</th><th>&nbsp;</th></tr>
         </thead>
-        <tbody>{"".join([await _fmt_row(*r) for r in _requests])}</tbody>
+        <tbody>{"".join([_fmt_row(r) for r in _requests])}</tbody>
     </table>
 </body>
 </html>

@@ -256,13 +256,6 @@ async def get_short_url(client: Client, short_url: str) -> str:
     return res.headers["Location"]
 
 
-async def refresh(client: Client, refresh_hash: str) -> None:
-    """Make a POST request to the /refresh endpoint."""
-    res = await client.post("/refresh", data={"hash": refresh_hash})
-    assert_status(res, 200)
-    assert_in("The page was successfully refreshed.", unescape(res.text), "Missing success message")
-
-
 async def logger(client: Client) -> str:
     """Get recent request from logger."""
     assert client.base_url.port is not None

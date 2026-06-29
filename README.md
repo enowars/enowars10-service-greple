@@ -109,3 +109,15 @@ The flagstore can be exploited through [ReDoS](https://en.wikipedia.org/wiki/ReD
 1. **ReDoS trigger**: A catastrophic-backtracking prefix (a character repeated a calibrated number of times) is prepended to a probe regex. The repetition count is automatically calibrated until the response timing cleanly separates the match case from the no-match case.
 1. **Timing oracle**: A classifier trained on the calibration samples turns each response's reported query time into a binary signal, indicating whether the probe regex matched the content containing the flag.
 1. **Binary-search extraction**: For each of the 16 short-URL characters, the alphabet is repeatedly halved using character-class probes, recovering each character in roughly four timed requests. The reconstructed short URL is then resolved via `/u/:hash` to read the flag from the long URL.
+
+## Flagstore 2
+
+The checker registers a user and verifies a netloc (the logger server) via `/verify_netloc`, storing the flag as that netloc's `api_key`. It then submits a page for the netloc so the origin gets crawled with the API key attached. The flag is retrieved via the Search Console (`/console`). The submitted URL is the attack info.
+
+The flagstore can be exploited through [HTTP request smuggling](https://en.wikipedia.org/wiki/HTTP_request_smuggling) (desync), caused by the netloc `api_key` being injected unsanitized into the outgoing crawl request.
+
+1. **Unsanitized API key**: The netloc `api_key` is embedded verbatim into the HTTP request greple sends when crawling/refreshing the origin, allowing CRLF injection of additional request data.
+1. **Smuggled request**: Registering and verifying the attacker's own netloc with an `api_key` containing CRLF sequences plus a partial `POST / HTTP/1.1` request with a calibrated `Content-Length` (sized to span the extra headers, the next request, and the flag) prefixes a smuggled request onto the connection.
+1. **Token completion**: The verification token is observed via the logger server (port `7778`) and posted to `/token` to claim the netloc.
+1. **Desync trigger**: Two concurrent `/refresh` requests are issued so the victim's flag-bearing crawl request (carrying its API key) spills into the boundary of the attacker's smuggled request.
+1. **Flag disclosure**: The leaked request bytes are read from the logger server and the flag is extracted with the flag regex.

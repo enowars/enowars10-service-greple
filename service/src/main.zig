@@ -115,7 +115,7 @@ fn postSubmitPage(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.R
     const url = try req.getParamStr(alloc, "url") orelse return error.InvalidRequest;
     defer alloc.free(url);
 
-    const connection = try crawler.get(user_hash);
+    const connection = try crawler.getOrPut(user_hash);
     try connection.crawl(user_hash, public != null, &try .init(alloc, url, true));
 
     try req.redirectTo("/queue", null);
@@ -168,7 +168,7 @@ fn postVerifyNetloc(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap
     try path.writer.writeAll("&token=");
     try path.writer.writeAll(&try nl.verificationToken(alloc, user.username));
 
-    const connection = try crawler.get(user.hash());
+    const connection = try crawler.getOrPut(user.hash());
     try connection.verify(&.{ .host = nl.host, .port = nl.port, .path = path.written() });
 
     try req.redirectTo("/console", null);
@@ -289,7 +289,7 @@ fn postRefresh(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Requ
     var index_entry: IndexEntry = try .get(alloc, try utils.hexToBytes(@sizeOf(utils.Hash), hash));
     defer index_entry.deinit(alloc);
 
-    const connection = try crawler.get(user.hash());
+    const connection = try crawler.getOrPut(user.hash());
     try connection.crawl(index_entry.user_hash, index_entry.public, &index_entry.url);
 
     try req.redirectTo("/queue", null);
@@ -311,13 +311,13 @@ fn getCron(alloc: std.mem.Allocator, mut: *std.Thread.Mutex, req: *const zap.Req
     }).interface());
 }
 
-fn getQueue(alloc: std.mem.Allocator, crawler: *const Crawler, req: *const zap.Request) !void {
+fn getQueue(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Request) !void {
     req.parseCookies(false);
 
     var user = try User.getFromCookie(alloc, req) orelse return error.AccessDenied;
     defer user.deinit(alloc);
 
-    const connection = crawler.connections.getPtr(user.hash()) orelse return req.redirectTo("/console", null);
+    const connection = crawler.get(user.hash()) orelse return req.redirectTo("/console", null);
     connection.mut.lock();
     defer connection.mut.unlock();
 
@@ -559,7 +559,7 @@ pub fn main() !void {
         .on_request = Handler.innerHandleRequest,
     });
     try listener.listen();
-    zap.start(.{ .workers = 2, .threads = 8 });
+    zap.start(.{ .workers = 1, .threads = 8 });
 }
 
 test {
