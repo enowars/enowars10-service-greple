@@ -330,9 +330,9 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
     )
 
     logs = await logger(client)
-    # TODO: read hex instead
-    content = re.sub("(?:[0-9a-f]{2} )+ +(.+?)\n", r"\1", unescape(logs))
-    return "\n".join(m[0] for m in re.finditer(task.flag_regex, content))
+    lines = "".join(re.findall("(?:[0-9a-f]{2} )+ ", unescape(logs)))
+    content = bytes.fromhex(lines.replace(" ", "")).decode()
+    return "\n".join(re.findall(task.flag_regex, content))
 
 
 def app() -> fastapi.FastAPI:
