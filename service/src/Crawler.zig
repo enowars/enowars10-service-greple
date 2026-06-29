@@ -89,24 +89,22 @@ fn addrToCStr(addr: std.net.Address, w: *std.Io.Writer.Allocating) !struct { [:0
 fn isAddressSafe(address: std.net.Address) bool {
     if (address.any.family != std.posix.AF.INET) return false;
     if (std.mem.asBytes(&address.in.sa.addr)[3] % 255 == 0) return false;
-    // TODO: replace switches with ifs
-    // switch (std.mem.bigToNative(u32, address.in.sa.addr)) {
-    //     bytesToU32(.{ 10, 0, 0, 0 })...bytesToU32(.{ 10, 255, 255, 255 }),
-    //     bytesToU32(.{ 91, 99, 0, 0 })...bytesToU32(.{ 91, 99, 255, 255 }), // TODO: remove CICD
-    //     bytesToU32(.{ 172, 18, 0, 1 }),
-    //     => {},
-    //     else => return false,
-    // }
-    // if (address.getPort() < 1024 or address.getPort() > 9999) return false;
-    return true;
+    if (address.getPort() < 1024 or address.getPort() > 9999) return false;
+    if (std.mem.asBytes(&address.in.sa.addr)[0] == 10) return true;
+    // TODO: remove VVVVV
+    if (std.mem.asBytes(&address.in.sa.addr)[0] == 91 and std.mem.asBytes(&address.in.sa.addr)[1] == 99) return true;
+    // TODO: ^^^^^^^^^^^^
+    return false;
 }
 
 test isAddressSafe {
-    try std.testing.expect(!isAddressSafe(.initIp6(.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, 1, 1, 1)));
-    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 0 }, 1)));
-    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 255 }, 1)));
-    try std.testing.expect(isAddressSafe(.initIp4(.{ 1, 1, 1, 1 }, 1)));
-    // TODO: extend
+    try std.testing.expect(!isAddressSafe(.initIp6(.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, 1, 1, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 0 }, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 255 }, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 1 }, 8080)));
+    try std.testing.expect(isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 18080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 80)));
 }
 
 pub const Connection = struct {
