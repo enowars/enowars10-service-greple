@@ -10,9 +10,9 @@ RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/
 
 FROM alpine:3.23
 RUN apk add --no-cache py3-aiohttp
-COPY --from=builder /greple/zig-out/bin/greple /greple/zig-out/bin/greple
-COPY echo.py /echo.py
+WORKDIR /data
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-WORKDIR /data
+COPY echo.py /echo.py
+COPY --from=builder /greple/zig-out/bin/greple /greple/zig-out/bin/greple
 CMD ["/entrypoint.sh"]

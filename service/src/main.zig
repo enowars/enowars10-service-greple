@@ -161,17 +161,15 @@ fn postVerifyNetloc(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap
     const nl: Netloc = try .init(alloc, user.hash(), netloc, api_key);
     try nl.put();
 
-    const url: Url = .{
-        .host = nl.host,
-        .port = nl.port,
-        .path = try std.mem.concat(alloc, u8, &.{
-            "/.verify?token=",
-            &try nl.verificationToken(alloc, user.username),
-        }),
-    };
-    defer alloc.free(url.path);
+    var path: std.Io.Writer.Allocating = .init(alloc);
+    defer path.deinit();
+    try path.writer.writeAll("/.verify?user=");
+    try std.Uri.Component.percentEncode(&path.writer, user.username, utils.pathValidChar);
+    try path.writer.writeAll("&token=");
+    try path.writer.writeAll(&try nl.verificationToken(alloc, user.username));
+
     const connection = try crawler.get(user.hash());
-    try connection.verify(&url);
+    try connection.verify(&.{ .host = nl.host, .port = nl.port, .path = path.written() });
 
     try req.redirectTo("/console", null);
 }

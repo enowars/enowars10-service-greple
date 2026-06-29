@@ -21,7 +21,7 @@ from enochecker3.utils import assert_equals, assert_in
 
 from client import Client
 from exploit import calibrate_redos, exploit_sca_letter
-from noise import username_noise, word_noise
+from noise import letter_noise, username_noise, word_noise
 from utils import (
     PASTE_URL_REGEX,
     SHORT_URL_LENGTH,
@@ -31,6 +31,7 @@ from utils import (
     assert_status,
     get_search_console,
     get_short_url,
+    logger,
     paste,
     re_escape,
     register_user,
@@ -189,39 +190,28 @@ async def _verify_netloc(client: Client) -> None:
     assert client.base_url.port is not None
     port = client.base_url.port + 1
 
-    username = username_noise(128)
-    await register_user(client, username)
-    url = str(client.base_url.copy_with(port=port, path="/path"))
+    user_a = username_noise(128)
+    await register_user(client, user_a)
+    url = str(client.base_url.copy_with(port=port, path=f"/{letter_noise(16)}"))
     await submit_page(client, False, url)
 
-    await register_user(client, username_noise(128))
+    user_b = username_noise(128)
+    await register_user(client, user_b)
 
     netloc = client.base_url.copy_with(port=port).netloc.decode()
-    netloc_hash = await verify_netloc(client, netloc, "")
-
-    done = set()
+    api_key = letter_noise(128)
+    netloc_hash = await verify_netloc(client, netloc, api_key)
 
     while True:
-        resp = await client.get(client.base_url.copy_with(port=port, path="/"))
-        assert_status(resp, 200)
+        logs = await logger(client)
+        t = re.search(f"user={re.escape(user_b)}&token=([0-9a-f]{{56}})", unquote(unescape(logs)))
+        if t:
+            break
+        await asyncio.sleep(0.1)
 
-        for match in re.finditer("token=([0-9a-f]{56})", unescape(resp.text)):
-            if match[1] in done:
-                continue
-            done.add(match[1])
-
-            try:
-                body = await token(client, netloc_hash, match[1])
-            except MumbleException as e:
-                if str(e) == "Unexpected HTTP status code":
-                    continue
-                raise
-
-            assert_in(url, unescape(body), "Failed to find entries for verified netloc")
-            assert_in(username, unescape(body), "Failed to find entries for verified netloc")
-            return
-
-        await asyncio.sleep(0.5)
+    body = await token(client, netloc_hash, t[1])
+    assert_in(url, unescape(body), "Failed to find entries for verified netloc")
+    assert_in(user_a, unescape(body), "Failed to find entries for verified netloc")
 
 
 @_CHECKER.exploit(0)

@@ -8,7 +8,7 @@ import itertools
 
 from aiohttp import web
 
-_requests: collections.deque[tuple[float, web.BaseRequest]] = collections.deque(maxlen=100)
+_requests: collections.deque[tuple[float, web.BaseRequest]] = collections.deque()
 
 
 def _hexdump(data: bytes) -> str:
@@ -25,13 +25,20 @@ async def _fmt_row(timestamp: float, request: web.BaseRequest) -> str:
         f"<tr><td>{timestamp:.4f}</td>"
         f"<td>{html.escape(request.method)}</td>"
         f"<td>{html.escape(request.raw_path)}</td>"
-        f"<td><pre>{html.escape(_hexdump(await request.read()))}</pre></td></tr>"
+        f"<td><details><summary>Headers</summary><pre>{html.escape('\n'.join(f'{k}: {v}' for k, v in request.headers.items() if k.lower() != 'cookie'))}</pre></details>"
+        f"<details><summary>Content</summary><pre>{html.escape(_hexdump(await request.read()))}</pre></details></td></tr>"
     )
 
 
 async def _logger(request: web.BaseRequest) -> web.Response:
-    _requests.append((datetime.datetime.now(tz=datetime.UTC).timestamp(), request))
-    text = f"""
+    now = datetime.datetime.now(tz=datetime.UTC).timestamp()
+    _requests.append((now, request))
+    while _requests and _requests[0][0] < now - 20:
+        _requests.popleft()
+
+    if request.path == "/":
+        return web.Response(
+            text=f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,14 +57,17 @@ async def _logger(request: web.BaseRequest) -> web.Response:
     <p>Recent requests</p>
     <table>
         <thead>
-            <tr><th>UNIX Timestamp</th><th>Method</th><th>Path</th><th>Content</th></tr>
+            <tr><th>UNIX Timestamp</th><th>Method</th><th>Path</th><th>&nbsp;</th></tr>
         </thead>
         <tbody>{"".join([await _fmt_row(*r) for r in _requests])}</tbody>
     </table>
 </body>
 </html>
-""".strip()
-    return web.Response(text=text, content_type="text/html")
+""".strip(),
+            content_type="text/html",
+        )
+
+    return await _ok(request)
 
 
 async def _ok(_: web.BaseRequest) -> web.Response:

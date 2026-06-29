@@ -26,6 +26,11 @@ def username_noise(entropy: int) -> str:
     return _noise(string.ascii_letters + string.digits + "_+-=", "", entropy)
 
 
+def letter_noise(entropy: int) -> str:
+    """Generate noise consisting of ASCII letters."""
+    return _noise(string.ascii_letters, "", entropy)
+
+
 def word_noise(entropy: int) -> str:
     """Generate noise consisting of space separated ASCII lowercase letter words."""
     e = 0.0

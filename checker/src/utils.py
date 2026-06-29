@@ -261,3 +261,11 @@ async def refresh(client: Client, refresh_hash: str) -> None:
     res = await client.post("/refresh", data={"hash": refresh_hash})
     assert_status(res, 200)
     assert_in("The page was successfully refreshed.", unescape(res.text), "Missing success message")
+
+
+async def logger(client: Client) -> str:
+    """Get recent request from logger."""
+    assert client.base_url.port is not None
+    res = await client.get(client.base_url.copy_with(port=client.base_url.port + 1, path="/"))
+    assert_status(res, 200)
+    return res.text
