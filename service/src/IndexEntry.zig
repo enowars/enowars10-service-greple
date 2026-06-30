@@ -18,16 +18,14 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir(.{});
     defer dir.close();
 
-    var file = try dir.createFile(&std.fmt.bytesToHex(self.hash(), .lower), .{});
-    defer file.close();
-
-    var writer = file.writer(&.{});
-
-    try writer.interface.writeByte(@intFromBool(self.public));
-    try writer.interface.writeAll(&self.user_hash);
-    try self.url.write(&writer.interface);
-    try writer.interface.writeInt(u16, @truncate(self.title.len), .little);
-    try writer.interface.writeAll(self.title);
+    var writer: utils.Writer = try .open(dir, &std.fmt.bytesToHex(self.hash(), .lower));
+    defer writer.close();
+    try writer.interface().writeByte(@intFromBool(self.public));
+    try writer.interface().writeAll(&self.user_hash);
+    try self.url.write(writer.interface());
+    try writer.interface().writeInt(u16, @truncate(self.title.len), .little);
+    try writer.interface().writeAll(self.title);
+    try writer.end();
 }
 
 fn getFromDir(alloc: std.mem.Allocator, dir: std.fs.Dir, filename: []const u8) !@This() {

@@ -525,10 +525,12 @@ fn handleRequest(
 }
 
 fn makeDir(sub_path: []const u8) !void {
-    std.fs.cwd().makeDir(sub_path) catch |err| switch (err) {
-        std.fs.Dir.MakeError.PathAlreadyExists => {},
-        else => return err,
+    var dir = std.fs.cwd().openDir(sub_path, .{ .iterate = true }) catch |err| switch (err) {
+        std.fs.Dir.OpenError.FileNotFound => return std.fs.cwd().makeDir(sub_path),
+        else => |leftover_err| return leftover_err,
     };
+    defer dir.close();
+    try utils.cleanUpTmpFiles(dir);
 }
 
 pub fn main() !void {

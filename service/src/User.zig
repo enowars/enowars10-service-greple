@@ -22,14 +22,12 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir(.{});
     defer dir.close();
 
-    var file = try dir.createFile(&std.fmt.bytesToHex(self.hash(), .lower), .{});
-    defer file.close();
-
-    var writer = file.writer(&.{});
-
-    try writer.interface.writeInt(u16, @truncate(self.username.len), .little);
-    try writer.interface.writeAll(self.username);
-    try writer.interface.writeAll(&self.password_hash.?);
+    var writer: utils.Writer = try .open(dir, &std.fmt.bytesToHex(self.hash(), .lower));
+    defer writer.close();
+    try writer.interface().writeInt(u16, @truncate(self.username.len), .little);
+    try writer.interface().writeAll(self.username);
+    try writer.interface().writeAll(&self.password_hash.?);
+    try writer.end();
 }
 
 pub fn get(alloc: std.mem.Allocator, user_hash: utils.Hash) !@This() {

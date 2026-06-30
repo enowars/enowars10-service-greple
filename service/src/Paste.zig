@@ -15,19 +15,13 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = std.fmt.bytesToHex(self.hash(), .lower);
-    var file = dir.createFile(&filename, .{ .exclusive = true }) catch |err| switch (err) {
-        std.fs.File.OpenError.PathAlreadyExists => return,
-        else => |leftover_err| return leftover_err,
-    };
-    defer file.close();
-
-    var writer = file.writer(&.{});
-
-    try writer.interface.writeInt(u16, @truncate(self.title.len), .little);
-    try writer.interface.writeAll(self.title);
-    try writer.interface.writeInt(u16, @truncate(self.text.len), .little);
-    try writer.interface.writeAll(self.text);
+    var writer: utils.Writer = try .open(dir, &std.fmt.bytesToHex(self.hash(), .lower));
+    defer writer.close();
+    try writer.interface().writeInt(u16, @truncate(self.title.len), .little);
+    try writer.interface().writeAll(self.title);
+    try writer.interface().writeInt(u16, @truncate(self.text.len), .little);
+    try writer.interface().writeAll(self.text);
+    try writer.end();
 }
 
 pub fn get(alloc: std.mem.Allocator, paste_hash: utils.Hash) !@This() {

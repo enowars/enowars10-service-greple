@@ -9,10 +9,8 @@ COPY src src
 RUN --mount=type=cache,target=.zig-cache --mount=type=cache,target=/root/.cache/zig zig build -freference-trace=100
 
 FROM alpine:3.23
-RUN apk add --no-cache py3-aiohttp
+RUN apk add --no-cache py3-aiohttp multirun
 WORKDIR /data
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 COPY echo.py /echo.py
-COPY --from=builder /greple/zig-out/bin/greple /greple/zig-out/bin/greple
-CMD ["/entrypoint.sh"]
+COPY --from=builder /greple/zig-out/bin/greple /greple
+CMD ["multirun", "python /echo.py", "/greple"]

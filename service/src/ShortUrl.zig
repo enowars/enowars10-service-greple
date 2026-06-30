@@ -1,5 +1,6 @@
-const Url = @import("Url.zig");
 const std = @import("std");
+const Url = @import("Url.zig");
+const utils = @import("utils.zig");
 
 pub const bytes = 64 / 8;
 
@@ -17,15 +18,10 @@ pub fn put(self: *const @This()) !void {
     var dir = try openDir(.{});
     defer dir.close();
 
-    const filename = &std.fmt.bytesToHex(self.hash(), .lower);
-    var file = dir.createFile(filename, .{ .exclusive = true }) catch |err| switch (err) {
-        std.fs.File.OpenError.PathAlreadyExists => return,
-        else => |leftover_err| return leftover_err,
-    };
-    defer file.close();
-
-    var writer = file.writer(&.{});
-    try self.url.write(&writer.interface);
+    var writer: utils.Writer = try .open(dir, &std.fmt.bytesToHex(self.hash(), .lower));
+    defer writer.close();
+    try self.url.write(writer.interface());
+    try writer.end();
 }
 
 pub fn get(alloc: std.mem.Allocator, short_url_hash: [bytes]u8) !@This() {

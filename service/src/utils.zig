@@ -150,3 +150,102 @@ test unescape {
         try std.testing.expectEqualStrings("a'b&c", r);
     }
 }
+
+pub const Writer = struct {
+    dir: std.fs.Dir,
+    name: []const u8,
+    tmp_name: [17]u8,
+    file: ?std.fs.File,
+    writer: std.fs.File.Writer,
+
+    pub fn open(dir: std.fs.Dir, name: []const u8) !@This() {
+        std.debug.assert(name.len >= 16);
+        var tmp_name: [17]u8 = undefined;
+        tmp_name[0] = '.';
+        @memcpy(tmp_name[1..], name[0..16]);
+
+        const file = dir.createFile(&tmp_name, .{ .exclusive = true }) catch |err| switch (err) {
+            std.fs.File.OpenError.PathAlreadyExists => return error.WriteAlreadyInProgress,
+            else => |leftover_err| return leftover_err,
+        };
+        errdefer {
+            file.close();
+            dir.deleteFile(tmp_name) catch {};
+        }
+
+        return .{
+            .dir = dir,
+            .name = name,
+            .tmp_name = tmp_name,
+            .file = file,
+            .writer = file.writer(&.{}),
+        };
+    }
+
+    pub fn interface(self: *@This()) *std.Io.Writer {
+        return &self.writer.interface;
+    }
+
+    pub fn end(self: *@This()) !void {
+        self.file.?.close();
+        self.file = null;
+        try self.dir.rename(&self.tmp_name, self.name);
+    }
+
+    pub fn close(self: *@This()) void {
+        if (self.file) |f| {
+            f.close();
+            self.dir.deleteFile(&self.tmp_name) catch {};
+        }
+    }
+};
+
+test Writer {
+    var dir = std.testing.tmpDir(.{});
+    defer dir.cleanup();
+    var w: Writer = try .open(dir.dir, "0123456789abcdef");
+    defer w.close();
+    try w.interface().writeAll("xyz");
+    try w.end();
+    const file = try dir.dir.openFile("0123456789abcdef", .{});
+    defer file.close();
+    const data = try file.readToEndAlloc(std.testing.allocator, std.math.maxInt(usize));
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("xyz", data);
+}
+
+fn _cleanUpTmpFiles(dir: std.fs.Dir, it: *std.fs.Dir.Iterator) !void {
+    while (try it.next()) |e| if (e.name[0] == '.') try dir.deleteFile(e.name);
+}
+
+pub fn cleanUpTmpFiles(dir: std.fs.Dir) !void {
+    var it = dir.iterateAssumeFirstIteration();
+    try _cleanUpTmpFiles(dir, &it);
+}
+
+test cleanUpTmpFiles {
+    var dir = std.testing.tmpDir(.{ .iterate = true });
+    defer dir.cleanup();
+    {
+        const file = try dir.dir.createFile(".abc", .{});
+        defer file.close();
+    }
+    {
+        const file = try dir.dir.createFile("xyz", .{});
+        defer file.close();
+    }
+    var it = dir.dir.iterate();
+    try _cleanUpTmpFiles(dir.dir, &it);
+    blk: {
+        const file = dir.dir.openFile(".abc", .{}) catch |err| switch (err) {
+            std.fs.File.OpenError.FileNotFound => break :blk,
+            else => |leftover_err| return leftover_err,
+        };
+        defer file.close();
+        return error.ExpectedFileNotFoundError;
+    }
+    {
+        const file = try dir.dir.openFile("xyz", .{});
+        defer file.close();
+    }
+}

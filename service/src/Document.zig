@@ -20,12 +20,10 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     var user_dir = try dir.openDir(&dirname, .{});
     defer user_dir.close();
 
-    var file = try user_dir.createFile(&std.fmt.bytesToHex(index_entry.url.hash(), .lower), .{});
-    defer file.close();
-
-    var writer = file.writer(&.{});
-
-    for (self.text) |l| try writer.interface.print("{s}\n", .{l});
+    var writer: utils.Writer = try .open(user_dir, &std.fmt.bytesToHex(index_entry.url.hash(), .lower));
+    defer writer.close();
+    for (self.text) |l| try writer.interface().print("{s}\n", .{l});
+    try writer.end();
 }
 
 pub fn runCron(user_hash_hex: []const u8) !void {
