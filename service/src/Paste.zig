@@ -46,14 +46,14 @@ pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(&utils.hash(self.title) ++ &utils.hash(self.text));
 }
 
-pub fn runCron(now: i128) !void {
+pub fn runCron(threshold: i128) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
         const stat = try dir.statFile(e.name);
-        if (now - stat.mtime < std.time.ns_per_hour) continue;
+        if (stat.mtime > threshold) continue;
         try dir.deleteFile(e.name);
     }
 }

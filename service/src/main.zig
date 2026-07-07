@@ -291,10 +291,10 @@ fn postRefresh(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap.Requ
 fn getCron(alloc: std.mem.Allocator, mut: *std.Thread.Mutex, req: *const zap.Request) !void {
     if (mut.tryLock()) {
         defer mut.unlock();
-        const now = std.time.nanoTimestamp();
-        try User.runCron(alloc, now);
-        try Paste.runCron(now);
-        try ShortUrl.runCron(now);
+        const threshold = std.time.nanoTimestamp() - std.time.ns_per_min * 12;
+        try User.runCron(alloc, threshold);
+        try Paste.runCron(threshold);
+        try ShortUrl.runCron(threshold);
     }
 
     return templates.respond(alloc, req, (templates.Message{
@@ -490,6 +490,11 @@ fn handleRequest(
             => |bad_request_err| blk: {
                 req.setStatus(.bad_request);
                 break :blk bad_request_err;
+            },
+            error.FileNotFound,
+            => |not_found_err| blk: {
+                req.setStatus(.not_found);
+                break :blk not_found_err;
             },
             error.AccessDenied,
             error.InvalidCredentials,

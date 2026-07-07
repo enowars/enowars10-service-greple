@@ -41,14 +41,14 @@ pub fn hash(self: *const @This()) [bytes]u8 {
     return self.url.hash()[0..bytes].*;
 }
 
-pub fn runCron(now: i128) !void {
+pub fn runCron(threshold: i128) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
         const stat = try dir.statFile(e.name);
-        if (now - stat.mtime < std.time.ns_per_hour) continue;
+        if (stat.mtime > threshold) continue;
         try dir.deleteFile(e.name);
     }
 }

@@ -77,7 +77,10 @@ fn aggregateResults(
         const user_hash = if (query.user_hash) |u| u else try utils.hexToBytes(@sizeOf(utils.Hash), dirname.?);
         const url_hash = try utils.hexToBytes(@sizeOf(utils.Hash), filename);
 
-        const index_entry: IndexEntry = try .get(alloc, utils.hash(&user_hash ++ &url_hash));
+        const index_entry = IndexEntry.get(alloc, utils.hash(&user_hash ++ &url_hash)) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => |leftover_err| return leftover_err,
+        };
         errdefer {
             alloc.free(index_entry.url.host);
             alloc.free(index_entry.url.path);

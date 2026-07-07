@@ -132,14 +132,14 @@ pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(self.username);
 }
 
-pub fn runCron(alloc: std.mem.Allocator, now: i128) !void {
+pub fn runCron(alloc: std.mem.Allocator, threshold: i128) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
         const stat = try dir.statFile(e.name);
-        if (now - stat.mtime < std.time.ns_per_hour) continue;
+        if (stat.mtime > threshold) continue;
 
         const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
 

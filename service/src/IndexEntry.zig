@@ -76,7 +76,10 @@ pub fn getByUserOrNetloc(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc
 
     var it = dir.iterateAssumeFirstIteration();
     outer: while (try it.next()) |e| {
-        var index_entry = try getFromDir(alloc, dir, e.name);
+        var index_entry = getFromDir(alloc, dir, e.name) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => |leftover_err| return leftover_err,
+        };
         errdefer index_entry.deinit(alloc);
 
         if (std.mem.eql(u8, &user_hash, &index_entry.user_hash)) {
