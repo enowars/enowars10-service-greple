@@ -503,6 +503,7 @@ fn handleRequest(
                 break :blk forbidden_err;
             },
             else => blk: {
+                if (@errorReturnTrace()) |rt| std.debug.dumpStackTrace(rt.*);
                 req.setStatus(.internal_server_error);
                 break :blk error.InternalServerError;
             },
