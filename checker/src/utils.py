@@ -119,7 +119,7 @@ async def get_search_console(client: Client) -> httpx.Response:
     return client.last_response
 
 
-async def submit_page(client: Client, public: bool, url: str) -> None:
+async def submit_page(client: Client, public: bool, url: str) -> str:
     """Submit a page."""
     await get_search_console(client)
 
@@ -147,6 +147,11 @@ async def submit_page(client: Client, public: bool, url: str) -> None:
     res = await client.send(res.next_request)
     assert_status(res, 200)
     assert_in(url, unescape(res.text), "Submitted URL not in table")
+
+    refresh_hash = re.search("refresh\\('([^']*)", unescape(res.text))
+    if not refresh_hash:
+        raise MumbleException("Couldn't find refresh hash")
+    return refresh_hash[1]
 
 
 async def shorten_url(client: Client, url: str) -> str:
