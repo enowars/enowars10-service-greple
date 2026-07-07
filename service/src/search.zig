@@ -70,6 +70,7 @@ fn aggregateResults(
         std.debug.assert(std.mem.eql(u8, split.next() orelse return error.UnexpectedGrepStdout, "."));
         const dirname = if (query.user_hash) |_| null else (split.next() orelse return error.UnexpectedGrepStdout);
         const filename = split.next() orelse return error.UnexpectedGrepStdout;
+        if (filename[0] == '.') continue;
         const text = split.rest();
 
         if (regex) |*r| if (r.isMatch(text)) continue;
