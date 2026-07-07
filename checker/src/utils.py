@@ -131,11 +131,11 @@ async def submit_page(client: Client, public: bool, url: str) -> str:
     if res.next_request is None:
         raise MumbleException("No redirect location")
 
-    while True:
+    for _ in range(10):
         res = await client.send(res.next_request)
         if res.status_code == 200:
             assert_in(url, unescape(res.text), "Submitted URL not queue")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             res.next_request = res.request
         elif res.status_code == 302:
             if res.next_request is None:
@@ -143,6 +143,8 @@ async def submit_page(client: Client, public: bool, url: str) -> str:
             break
         else:
             raise MumbleException("Unexpected HTTP status code")
+    else:
+        raise MumbleException("Page submission: Timeout waiting in queue")
 
     res = await client.send(res.next_request)
     assert_status(res, 200)
@@ -271,7 +273,7 @@ async def logger(client: Client, path: str) -> str:
 
 async def find_token(client: Client, username: str) -> str:
     """Find verify token in logger logs."""
-    while True:
+    for _ in range(10):
         logs = await logger(client, "/verify")
         t = re.search(
             f"x-verify-username: {re.escape(username)}\nx-verify-token: ([0-9a-f]{{56}})",
@@ -279,4 +281,5 @@ async def find_token(client: Client, username: str) -> str:
         )
         if t:
             return t[1]
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
+    raise MumbleException("Timeout waiting for request in logger")
