@@ -20,7 +20,7 @@ services:
         soft: 4000
         hard: 4000
   greple-mongo:
-    image: mongo
+    image: mongo:7
     volumes:
       - ./data:/data/db
     environment:
