@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import datetime
+import hashlib
 import html
 import itertools
 import typing
@@ -13,6 +14,7 @@ from aiohttp import web
 class _LoggedRequest(typing.NamedTuple):
     timestamp: float
     method: str
+    path: str
     raw_path: str
     headers: list[tuple[str, str]]
     body: bytes
@@ -42,26 +44,57 @@ def _fmt_row(entry: _LoggedRequest) -> str:
 
 async def _logger(request: web.BaseRequest) -> web.Response:
     now = datetime.datetime.now(tz=datetime.UTC).timestamp()
+    while _requests and _requests[0].timestamp < now - 20:
+        _requests.popleft()
+
+    if request.path.endswith(".logs"):
+        path = request.path.removesuffix(".logs")
+        return web.Response(
+            text=f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logger</title>
+<style>
+    html{{font-family:Arial,sans-serif}}
+    table{{border-collapse:collapse}}
+    thead{{border-bottom:2px solid black}}
+    th,td{{border:1px solid black;padding:4pt}}
+</style>
+</head>
+<body>
+<p>Recent requests to <code>{html.escape(path)}</code></p>
+<table>
+    <thead>
+        <tr><th>UNIX Timestamp</th><th>Method</th><th>Path</th><th>&nbsp;</th></tr>
+    </thead>
+    <tbody>{"".join(_fmt_row(r) for r in _requests if r.path == path)}</tbody>
+</table>
+</body>
+</html>
+""".strip(),
+            content_type="text/html",
+        )
+
     _requests.append(
         _LoggedRequest(
             timestamp=now,
             method=request.method,
+            path=request.path,
             raw_path=request.raw_path,
             headers=[
-                (k, v)
+                (k, hashlib.sha224(v.encode()).hexdigest() if k == "x-api-key" else v)
                 for k, v in request.headers.items()
                 if k.lower() != "cookie"
-                if k.lower() != "x-api-key" or v.startswith("public")
             ],
             body=await request.read(),
         ),
     )
-    while _requests and _requests[0].timestamp < now - 20:
-        _requests.popleft()
 
-    if request.path == "/":
-        return web.Response(
-            text=f"""
+    return web.Response(
+        text=f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,28 +102,17 @@ async def _logger(request: web.BaseRequest) -> web.Response:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logger</title>
     <style>
-        *{{box-sizing:border-box}}
         html{{font-family:Arial,sans-serif}}
-        table{{border-collapse:collapse}}
-        thead{{border-bottom:2px solid black}}
-        th,td{{border:1px solid black;padding:4pt}}
     </style>
 </head>
 <body>
-    <p>Recent requests</p>
-    <table>
-        <thead>
-            <tr><th>UNIX Timestamp</th><th>Method</th><th>Path</th><th>&nbsp;</th></tr>
-        </thead>
-        <tbody>{"".join([_fmt_row(r) for r in _requests])}</tbody>
-    </table>
+    <p>OK</p>
+    <p><a href="{html.escape(request.path)}.logs">See logs</a></p>
 </body>
 </html>
 """.strip(),
-            content_type="text/html",
-        )
-
-    return await _ok(request)
+        content_type="text/html",
+    )
 
 
 async def _ok(_: web.BaseRequest) -> web.Response:

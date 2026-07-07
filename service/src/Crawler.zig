@@ -13,7 +13,10 @@ const Queue = @import("queue.zig").Queue(union(enum) {
         public: bool,
         url: Url,
     },
-    verify: struct { url: Url },
+    verify: struct {
+        username: []const u8,
+        netloc: Netloc,
+    },
 }, 4);
 
 const title_re = mvzr.SizedRegex(17, 1).compile("<title>.*?</title>").?;
@@ -94,15 +97,16 @@ fn isAddressSafe(address: std.net.Address) bool {
     if (std.mem.asBytes(&address.in.sa.addr)[0] == 10) return true;
     // TODO: remove VVVVV
     if (std.mem.asBytes(&address.in.sa.addr)[0] == 91 and std.mem.asBytes(&address.in.sa.addr)[1] == 99) return true;
+    if (std.mem.asBytes(&address.in.sa.addr)[0] == 172) return true;
     // TODO: ^^^^^^^^^^^^
     return false;
 }
 
 test isAddressSafe {
     try std.testing.expect(!isAddressSafe(.initIp6(.{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, 1, 1, 8080)));
-    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 0 }, 8080)));
-    try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 255 }, 8080)));
     try std.testing.expect(!isAddressSafe(.initIp4(.{ 1, 1, 1, 1 }, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 0 }, 8080)));
+    try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 255 }, 8080)));
     try std.testing.expect(isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 8080)));
     try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 18080)));
     try std.testing.expect(!isAddressSafe(.initIp4(.{ 10, 1, 1, 1 }, 80)));
@@ -150,19 +154,6 @@ pub const Connection = struct {
         };
     }
 
-    fn getUrl(self: *@This()) *Url {
-        return switch (self.queue.get().*) {
-            inline else => |*i| &i.url,
-        };
-    }
-
-    fn onError(self: *@This(), err: anyerror) void {
-        std.log.warn("{f} ({f}): {}", .{ self.getUrl(), self.conn.?.addr, err });
-        self.getUrl().deinit(self.alloc);
-        self.queue.consume();
-        self.next();
-    }
-
     pub fn crawl(self: *@This(), user_hash: utils.Hash, public: bool, url: *const Url) !void {
         self.mut.lock();
         defer self.mut.unlock();
@@ -175,19 +166,39 @@ pub const Connection = struct {
         if (was_empty) self.next();
     }
 
-    pub fn verify(self: *@This(), url: *const Url) !void {
+    pub fn verify(self: *@This(), username: []const u8, netloc: *const Netloc) !void {
         self.mut.lock();
         defer self.mut.unlock();
 
-        var u = try url.toOwned(self.alloc);
-        errdefer u.deinit(self.alloc);
+        const owned_username = try self.alloc.dupe(u8, username);
+        errdefer self.alloc.free(owned_username);
+        var owned_netloc = try netloc.toOwned(self.alloc);
+        errdefer owned_netloc.deinit(self.alloc);
 
         const was_empty = self.queue.isEmpty();
-        try self.queue.put(.{ .verify = .{ .url = u } });
+        try self.queue.put(.{ .verify = .{ .username = owned_username, .netloc = owned_netloc } });
         if (was_empty) self.next();
     }
 
-    fn next(self: *@This()) void {
+    pub fn format(self: *@This(), w: *std.Io.Writer) !void {
+        switch (self.queue.get().*) {
+            .crawl => |c| try w.print("crawl: {f}", .{c.url}),
+            .verify => |v| try w.print("verify: {f}", .{v.netloc}),
+        }
+        if (self.conn) |c| try w.print(" ({f})", .{c.addr});
+    }
+
+    fn consume(self: *@This()) void {
+        switch (self.queue.get().*) {
+            .crawl => |*c| c.url.deinit(self.alloc),
+            .verify => |*v| {
+                self.alloc.free(v.username);
+                v.netloc.deinit(self.alloc);
+            },
+        }
+
+        self.queue.consume();
+
         if (self.queue.isEmpty()) {
             // TODO: free memory
             self.request = null;
@@ -195,16 +206,31 @@ pub const Connection = struct {
                 fio_close(c.uuid);
                 self.conn = null;
             }
-            return;
+        } else {
+            self.next();
         }
+    }
 
-        const url = self.getUrl();
+    fn onError(self: *@This(), err: anyerror, reset_conn: bool) void {
+        std.log.warn("{f}: {}", .{ self, err });
+        if (reset_conn) self.conn = null;
+        self.consume();
+    }
 
-        const address_list = std.net.getAddressList(
-            self.alloc,
-            url.host,
-            url.port,
-        ) catch |err| return self.onError(err);
+    fn next(self: *@This()) void {
+        self.http_settings.udata = self;
+
+        const host = switch (self.queue.get().*) {
+            .crawl => |c| c.url.host,
+            .verify => |v| v.netloc.host,
+        };
+        const port = switch (self.queue.get().*) {
+            .crawl => |c| c.url.port,
+            .verify => |v| v.netloc.port,
+        };
+
+        const address_list = std.net.getAddressList(self.alloc, host, port) catch |err|
+            return self.onError(err, false);
         defer address_list.deinit();
 
         if (self.conn) |c| {
@@ -221,24 +247,24 @@ pub const Connection = struct {
 
             var buffer: std.Io.Writer.Allocating = .init(self.alloc);
             defer buffer.deinit();
-            const address, const port = addrToCStr(a, &buffer) catch |err| return self.onError(err);
+            const address, const str_port = addrToCStr(a, &buffer) catch |err| return self.onError(err, false);
 
             const uuid = fio_connect(.{
                 .address = address,
-                .port = port,
+                .port = str_port,
                 .on_connect = on_connect,
                 .on_fail = on_fail,
                 .tls = null,
                 .udata = self,
                 .timeout = 0,
             });
-            if (uuid < 0) return self.onError(error.OpeningConnectionFailed);
+            if (uuid < 0) return self.onError(error.OpeningConnectionFailed, false);
 
             self.conn = .{ .addr = a, .uuid = uuid };
             return;
         }
 
-        self.onError(error.NoValidAddress);
+        self.onError(error.NoValidAddress, false);
     }
 
     fn onConnect(self: *@This()) void {
@@ -248,7 +274,6 @@ pub const Connection = struct {
         std.debug.assert(self.request == null);
         std.debug.assert(!self.queue.isEmpty());
 
-        self.http_settings.udata = self;
         self.sendRequest();
     }
 
@@ -259,11 +284,7 @@ pub const Connection = struct {
         std.debug.assert(self.request == null);
         std.debug.assert(!self.queue.isEmpty());
 
-        std.log.warn("{f} ({f}): error.ConnectionFailed", .{ self.getUrl(), self.conn.?.addr });
-        self.getUrl().deinit(self.alloc);
-        self.queue.consume();
-        self.conn = null;
-        self.next();
+        self.onError(error.ConnectionFailed, true);
     }
 
     fn onResponse(self: *@This(), response: *const zap.fio.http_s) void {
@@ -274,13 +295,13 @@ pub const Connection = struct {
         std.debug.assert(!self.queue.isEmpty());
 
         switch (self.queue.get().*) {
-            .crawl => |item| {
-                if (response.status != 200) return self.onError(error.StatusNot200Ok);
+            .crawl => |c| {
+                if (response.status != 200) return self.onError(error.StatusNot200Ok, false);
 
                 const x = zap.fio.fiobj_obj2cstr(response.body);
                 const body = x.data[0..x.len];
 
-                const title_tag = title_re.match(body) orelse return self.onError(error.NoTitle);
+                const title_tag = title_re.match(body) orelse return self.onError(error.NoTitle, false);
                 const title = title_tag.slice["<title>".len .. title_tag.slice.len - "</title>".len];
 
                 var text: std.ArrayList([]const u8) = .empty;
@@ -289,45 +310,46 @@ pub const Connection = struct {
                 while (it.next()) |p_tag| {
                     std.debug.assert(p_tag.slice.len > "<p></p>".len);
                     const p = body[p_tag.start + "<p>".len .. p_tag.end - "</p>".len];
-                    text.append(self.alloc, utils.unescape(p)) catch |err| return self.onError(err);
+                    text.append(self.alloc, utils.unescape(p)) catch |err| return self.onError(err, false);
                 }
-                if (text.items.len == 0) return self.onError(error.NoText);
+                if (text.items.len == 0) return self.onError(error.NoText, false);
 
                 const index_entry: IndexEntry = .{
-                    .public = item.public,
-                    .user_hash = item.user_hash,
-                    .url = item.url,
+                    .public = c.public,
+                    .user_hash = c.user_hash,
+                    .url = c.url,
                     .title = title,
                 };
-                index_entry.put() catch |err| return self.onError(err);
-                (Document{
-                    .text = text.items,
-                }).put(&index_entry) catch |err| return self.onError(err);
+                index_entry.put() catch |err| return self.onError(err, false);
+                (Document{ .text = text.items }).put(&index_entry) catch |err| return self.onError(err, false);
             },
             .verify => {},
         }
 
-        self.getUrl().deinit(self.alloc);
-        self.queue.consume();
-        self.next();
+        self.consume();
     }
 
     fn sendRequest(self: *@This()) void {
+        const path = switch (self.queue.get().*) {
+            .crawl => |c| c.url.path,
+            .verify => "/verify",
+        };
+
         self.request = @ptrCast(@alignCast(fio_malloc(@sizeOf(zap.fio.http_s)) orelse
-            return self.onError(error.RequestAllocFailed)));
+            return self.onError(error.RequestAllocFailed, false)));
         self.request.?.* = .{
             .private_data = .{
                 .vtbl = http1_vtable(),
                 .flag = @intFromPtr(http1_new(self.conn.?.uuid, &self.http_settings, null, 0).?),
-                .out_headers = 0,
+                .out_headers = zap.fio.fiobj_hash_new(),
             },
             .received_at = .{ .tv_sec = 0, .tv_nsec = 0 },
             .method = 0,
             .status_str = 0,
             .version = 0,
-            .path = 0,
+            .path = zap.fio.fiobj_str_new(path.ptr, path.len),
             .query = 0,
-            .headers = 0,
+            .headers = zap.fio.fiobj_hash_new(),
             .cookies = 0,
             .params = 0,
             .body = 0,
@@ -335,37 +357,45 @@ pub const Connection = struct {
             .udata = null,
         };
 
-        // TODO: move up
-        self.request.?.private_data.out_headers = zap.fio.fiobj_hash_new();
-        self.request.?.headers = zap.fio.fiobj_hash_new();
-
-        const url = self.getUrl();
         var host: std.Io.Writer.Allocating = .init(self.alloc);
+        (switch (self.queue.get().*) {
+            .crawl => |c| c.url.formatNetloc(&host.writer),
+            .verify => |v| v.netloc.format(&host.writer),
+        }) catch |err| return self.onError(err, false);
         defer host.deinit();
-        url.formatNetloc(&host.writer) catch |err| return self.onError(err);
-
-        self.request.?.path = zap.fio.fiobj_str_new(url.path.ptr, url.path.len);
 
         if (zap.fio.http_set_header2(
             self.request.?,
-            zap.util.str2fio("Host"),
+            zap.util.str2fio("host"),
             zap.util.str2fio(host.written()),
-        ) < 0) return self.onError(error.FailedToSetHostHeader);
+        ) < 0) return self.onError(error.FailedToSetHeader, false);
 
         switch (self.queue.get().*) {
             .crawl => |c| blk: {
                 var netloc = Netloc.getByUserUrl(self.alloc, c.user_hash, &c.url) catch |err| switch (err) {
                     std.fs.File.OpenError.FileNotFound => break :blk,
-                    else => |leftover_err| return self.onError(leftover_err),
+                    else => |leftover_err| return self.onError(leftover_err, false),
                 };
                 defer netloc.deinit(self.alloc);
                 if (zap.fio.http_set_header2(
                     self.request.?,
-                    zap.util.str2fio("X-API-Key"),
+                    zap.util.str2fio("x-api-key"),
                     zap.util.str2fio(netloc.api_key),
-                ) < 0) return self.onError(error.FailedToSetApiKey);
+                ) < 0) return self.onError(error.FailedToSetHeader, false);
             },
-            else => {},
+            .verify => |v| {
+                if (zap.fio.http_set_header2(
+                    self.request.?,
+                    zap.util.str2fio("x-verify-username"),
+                    zap.util.str2fio(v.username),
+                ) < 0) return self.onError(error.FailedToSetHeader, false);
+                if (zap.fio.http_set_header2(
+                    self.request.?,
+                    zap.util.str2fio("x-verify-token"),
+                    zap.util.str2fio(&(v.netloc.verificationToken(self.alloc, v.username) catch |err|
+                        return self.onError(err, false))),
+                ) < 0) return self.onError(error.FailedToSetHeader, false);
+            },
         }
 
         // TODO: don't use, as it sends date and last-modified on a request???

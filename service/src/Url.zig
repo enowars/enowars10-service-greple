@@ -72,7 +72,9 @@ pub fn toStdUri(self: *const @This()) std.Uri {
 
 pub fn toOwned(self: *const @This(), alloc: std.mem.Allocator) !@This() {
     const host = try alloc.dupe(u8, self.host);
+    errdefer alloc.free(host);
     const path = try alloc.dupe(u8, self.path);
+    errdefer alloc.free(path);
     return .{ .host = host, .port = self.port, .path = path };
 }
 

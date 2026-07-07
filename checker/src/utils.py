@@ -256,9 +256,22 @@ async def get_short_url(client: Client, short_url: str) -> str:
     return res.headers["Location"]
 
 
-async def logger(client: Client) -> str:
+async def logger(client: Client, path: str) -> str:
     """Get recent request from logger."""
     assert client.base_url.port is not None
-    res = await client.get(client.base_url.copy_with(port=client.base_url.port + 1, path="/"))
+    res = await client.get(client.base_url.copy_with(port=client.base_url.port + 1, path=f"{path}.logs"))
     assert_status(res, 200)
     return res.text
+
+
+async def find_token(client: Client, username: str) -> str:
+    """Find verify token in logger logs."""
+    while True:
+        logs = await logger(client, "/verify")
+        t = re.search(
+            f"x-verify-username: {re.escape(username)}\nx-verify-token: ([0-9a-f]{{56}})",
+            unescape(logs),
+        )
+        if t:
+            return t[1]
+        await asyncio.sleep(0.1)

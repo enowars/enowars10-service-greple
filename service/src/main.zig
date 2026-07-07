@@ -161,15 +161,8 @@ fn postVerifyNetloc(alloc: std.mem.Allocator, crawler: *Crawler, req: *const zap
     const nl: Netloc = try .init(alloc, user.hash(), netloc, api_key);
     try nl.put();
 
-    var path: std.Io.Writer.Allocating = .init(alloc);
-    defer path.deinit();
-    try path.writer.writeAll("/.verify?user=");
-    try std.Uri.Component.percentEncode(&path.writer, user.username, utils.pathValidChar);
-    try path.writer.writeAll("&token=");
-    try path.writer.writeAll(&try nl.verificationToken(alloc, user.username));
-
     const connection = try crawler.getOrPut(user.hash());
-    try connection.verify(&.{ .host = nl.host, .port = nl.port, .path = path.written() });
+    try connection.verify(user.username, &nl);
 
     try req.redirectTo("/console", null);
 }
@@ -482,7 +475,7 @@ fn handleRequest(
 
         const safe_err = switch (err) {
             error.HostTooLong,
-            error.InvalidHost,
+            error.InvalidNetloc,
             error.InvalidOrTooComplexRegex,
             error.InvalidPassword,
             error.InvalidRequest,

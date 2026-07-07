@@ -364,26 +364,27 @@ pub const SearchConsole = struct {
             \\<p>These are netlocs you verified your ownership of.</p>
             \\<table>
             \\  <thead>
-            \\    <tr><th>Netloc</th><th>API key</th></tr>
+            \\    <tr><th>Netloc</th><th>API key</th><th>Verification</th></tr>
             \\  </thead>
             \\  <tbody>
         );
         for (s.netlocs, 0..) |nl, i| {
             try w.print(
-                \\<tr><td>{f}</td><td>{f}</td></tr>
+                \\<tr><td>{f}</td><td>{f}</td><td>
             , .{ nl, Escape{ .string = nl.api_key } });
-            if (!nl.verified) {
+            if (nl.verified) {
+                try w.writeAll("Verified");
+            } else {
                 try w.print(
-                    \\<tr><td colspan="2">
-                    \\  <form action="/token" method="POST">
-                    \\    <input type="hidden" name="hash" value="{s}">
-                    \\    <label for="netloc_{d}_token">Token:</label>
-                    \\    <input id="netloc_{d}_token" name="token" size="32">
-                    \\    <input type="submit" value="Verify">
-                    \\  </form>
-                    \\</td></tr>
+                    \\<form action="/token" method="POST">
+                    \\  <input type="hidden" name="hash" value="{s}">
+                    \\  <label for="netloc_{d}_token">Token:</label>
+                    \\  <input id="netloc_{d}_token" name="token" size="32">
+                    \\  <input type="submit" value="Verify">
+                    \\</form>
                 , .{ std.fmt.bytesToHex(nl.hash(), .lower), i, i });
             }
+            try w.writeAll("</td></tr>");
         }
         try w.writeAll(
             \\  </tbody>
@@ -426,17 +427,16 @@ pub const Queue = struct {
         try w.writeAll(
             \\<table>
             \\  <thead>
-            \\    <tr><th>#</th><th>URL</th></tr>
+            \\    <tr><th>#</th><th>Type</th><th>URL / Netloc</th></tr>
             \\  </thead>
             \\  <tbody>
         );
         var it = s.connection.queue.iter();
-        var c: isize = 0;
-        while (it.next()) |i| : (c += 1) try w.print(
-            \\<tr><td>{d}</td><td>{f}</td></tr>
-        , .{ c, switch (i.*) {
-            inline else => |x| x.url,
-        } });
+        var i: isize = 0;
+        while (it.next()) |e| : (i += 1) try switch (e.*) {
+            .crawl => |c| w.print("<tr><td>{d}</td><td>crawl</td><td>{f}</td></tr>", .{ i, c.url }),
+            .verify => |v| w.print("<tr><td>{d}</td><td>verify</td><td>{f}</td></tr>", .{ i, v.netloc }),
+        };
         try w.writeAll(
             \\  </tbody>
             \\</table>

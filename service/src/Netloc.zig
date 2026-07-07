@@ -10,7 +10,7 @@ api_key: []const u8,
 
 pub fn init(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc: []const u8, api_key: []const u8) !@This() {
     const url = Url.init(alloc, netloc, false) catch |err| switch (err) {
-        error.InvalidUrl => return error.InvalidHost,
+        error.InvalidUrl => return error.InvalidNetloc,
         else => |leftover_err| return leftover_err,
     };
     return .{
@@ -18,6 +18,20 @@ pub fn init(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc: []const u8,
         .user_hash = user_hash,
         .host = url.host,
         .port = url.port,
+        .api_key = api_key,
+    };
+}
+
+pub fn toOwned(self: *const @This(), alloc: std.mem.Allocator) !@This() {
+    const host = try alloc.dupe(u8, self.host);
+    errdefer alloc.free(host);
+    const api_key = try alloc.dupe(u8, self.api_key);
+    errdefer alloc.free(api_key);
+    return .{
+        .verified = self.verified,
+        .user_hash = self.user_hash,
+        .host = host,
+        .port = self.port,
         .api_key = api_key,
     };
 }
