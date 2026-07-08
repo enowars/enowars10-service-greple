@@ -52,6 +52,7 @@ pub fn runCron(threshold: i128) !void {
 
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
+        if (e.name[0] == '.') continue;
         const stat = try dir.statFile(e.name);
         if (stat.mtime > threshold) continue;
         try dir.deleteFile(e.name);

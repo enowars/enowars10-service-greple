@@ -76,6 +76,8 @@ pub fn getByUserOrNetloc(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc
 
     var it = dir.iterateAssumeFirstIteration();
     outer: while (try it.next()) |e| {
+        if (e.name[0] == '.') continue;
+
         var index_entry = getFromDir(alloc, dir, e.name) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => |leftover_err| return leftover_err,
@@ -107,6 +109,7 @@ pub fn runCron(alloc: std.mem.Allocator, user_hash: utils.Hash) !void {
     defer dir.close();
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
+        if (e.name[0] == '.') continue;
         var index_entry = try getFromDir(alloc, dir, e.name);
         defer index_entry.deinit(alloc);
         if (std.mem.eql(u8, &user_hash, &index_entry.user_hash)) try dir.deleteFile(e.name);
