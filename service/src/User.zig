@@ -146,8 +146,11 @@ pub fn runCron(alloc: std.mem.Allocator, threshold: i128) !void {
         const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
 
         try Document.runCron(e.name);
+        if (stat.mtime > threshold - std.time.ns_per_s * 10) continue;
+
         try IndexEntry.runCron(alloc, user_hash);
         try Netloc.runCron(alloc, user_hash);
+        if (stat.mtime > threshold - std.time.ns_per_s * 20) continue;
 
         try dir.deleteFile(e.name);
     }
