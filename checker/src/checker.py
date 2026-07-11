@@ -47,6 +47,7 @@ from utils import (
 )
 
 _CHECKER = Enochecker("greple", 7777)
+_cal = None
 
 
 @_CHECKER.register_dependency
@@ -277,10 +278,12 @@ async def _exploit_sca(
     assert task.attack_info is not None
     assert task.attack_info.startswith("user:")
 
-    cal = await calibrate_redos(logger, client)
+    global _cal
+    if _cal is None:
+        _cal = await calibrate_redos(logger, client)
 
     short_url = "".join(
-        [await exploit_sca_letter(logger, client, cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH)],
+        [await exploit_sca_letter(logger, client, _cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH)],
     )
 
     url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
