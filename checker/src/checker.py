@@ -5,6 +5,7 @@ import hashlib
 import logging
 import random
 import re
+from collections.abc import Awaitable, Iterable
 from html import unescape
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
@@ -269,6 +270,16 @@ async def _exploit_hmac(client: Client, task: ExploitCheckerTaskMessage) -> str:
     return "\n".join(m[0] for m in re.finditer(task.flag_regex, unquote(unescape(body))))
 
 
+async def _parallel[T](aws: Iterable[Awaitable[T]]) -> list[T]:
+    sem = asyncio.Semaphore(2)
+
+    async def wrap(aw: Awaitable[T]) -> T:
+        async with sem:
+            return await aw
+
+    return await asyncio.gather(*(wrap(aw) for aw in aws))
+
+
 @_CHECKER.exploit(1)
 async def _exploit_sca(
     logger: logging.LoggerAdapter,
@@ -283,7 +294,9 @@ async def _exploit_sca(
         _cal = await calibrate_redos(logger, client)
 
     short_url = "".join(
-        [await exploit_sca_letter(logger, client, _cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH)],
+        await _parallel(
+            exploit_sca_letter(logger, client, _cal, task.attack_info, i) for i in range(SHORT_URL_LENGTH)
+        ),
     )
 
     url = await get_short_url(client, SHORT_URL_PREFIX + short_url)
