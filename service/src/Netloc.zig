@@ -13,6 +13,7 @@ pub fn init(alloc: std.mem.Allocator, user_hash: utils.Hash, netloc: []const u8,
         error.InvalidUrl => return error.InvalidNetloc,
         else => |leftover_err| return leftover_err,
     };
+    if (url.port == 7777) return error.InvalidNetloc;
     return .{
         .verified = false,
         .user_hash = user_hash,
