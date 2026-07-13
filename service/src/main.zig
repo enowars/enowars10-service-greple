@@ -449,6 +449,18 @@ fn handleRequest(
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
+    var timer = std.time.Timer.start() catch null;
+    defer if (timer) |*t| {
+        const elapsed_ns = t.read();
+        if (elapsed_ns > std.time.ns_per_s) {
+            std.log.info("slow request: {s} {s} took {d}ms", .{
+                req.method orelse "?",
+                req.path orelse "?",
+                elapsed_ns / std.time.ns_per_ms,
+            });
+        }
+    };
+
     route(arena_alloc, crawler, req) catch |err| {
         std.log.info("{s} {s} {}", .{ req.method.?, req.path.?, err });
 
