@@ -26,10 +26,15 @@ pub fn put(self: *const @This(), index_entry: *const IndexEntry) !void {
     try writer.end();
 }
 
-pub fn runCron(user_hash_hex: []const u8) !void {
+pub fn runCron(user_hash_hex: []const u8) !bool {
     var dir = try openDir();
     defer dir.close();
+    dir.access(user_hash_hex, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => |leftover_err| return leftover_err,
+    };
     try dir.deleteTree(user_hash_hex);
+    return true;
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {

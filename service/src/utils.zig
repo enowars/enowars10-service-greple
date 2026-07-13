@@ -218,7 +218,9 @@ fn _cleanUpTmpFiles(dir: std.fs.Dir, it: *std.fs.Dir.Iterator) !void {
     while (try it.next()) |e| if (e.name[0] == '.') try dir.deleteFile(e.name);
 }
 
-pub fn cleanUpTmpFiles(dir: std.fs.Dir) !void {
+pub fn cleanUpTmpFiles(sub_path: []const u8) !void {
+    var dir = try std.fs.cwd().openDir(sub_path, .{ .iterate = true });
+    defer dir.close();
     var it = dir.iterateAssumeFirstIteration();
     try _cleanUpTmpFiles(dir, &it);
 }

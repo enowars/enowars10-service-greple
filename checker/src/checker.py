@@ -216,11 +216,6 @@ async def _get_public_document(client: Client, db: ChainDB) -> None:
 
 
 @_CHECKER.havoc(0)
-async def _cron(client: Client) -> None:
-    await client.get("/cron")
-
-
-@_CHECKER.havoc(1)
 async def _verify_netloc(client: Client) -> None:
     assert client.base_url.port is not None
     base_url = client.base_url.copy_with(port=client.base_url.port + 1)

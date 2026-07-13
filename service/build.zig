@@ -30,6 +30,17 @@ pub fn build(b: *std.Build) void {
         .root_module = greple,
     }));
 
+    const cron = b.createModule(.{
+        .root_source_file = b.path("src/cron.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.installArtifact(b.addExecutable(.{
+        .name = "cron",
+        .root_module = cron,
+    }));
+
     b.step("test", "Run tests").dependOn(&b.addRunArtifact(b.addTest(.{
         .root_module = greple,
     })).step);

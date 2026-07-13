@@ -82,12 +82,6 @@ Endpoints are grouped by feature. Endpoints marked _(login)_ require a valid `us
 | `POST` | `/pastebin` | Submit a pastebin document. Fields: `title`, `text` |
 | `GET` | `/p/:hash` | View a pastebin document |
 
-### Maintenance
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/cron` | Periodic cleanup of expired users, pastes and short URLs (triggered by the checker) |
-
 ## Flagstore 0
 
 The checker registers a user and submits a page for indexing whose URL points to one of the OK servers (ports `7770-7776`), with the flag percent encoded into the URL path. The flag is retrieved via the Search Console (`/console`). The port is the attack info.

@@ -132,6 +132,12 @@ pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(self.username);
 }
 
+fn bumpMtime(dir: std.fs.Dir, name: []const u8, threshold: i128) !void {
+    const file = try dir.openFile(name, .{});
+    defer file.close();
+    try file.updateTimes(std.time.nanoTimestamp(), threshold + std.time.ns_per_s * 30);
+}
+
 pub fn runCron(alloc: std.mem.Allocator, threshold: i128) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
@@ -145,13 +151,14 @@ pub fn runCron(alloc: std.mem.Allocator, threshold: i128) !void {
 
         const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
 
-        try Document.runCron(e.name);
-        if (stat.mtime > threshold - std.time.ns_per_s * 10) continue;
-
-        try IndexEntry.runCron(alloc, user_hash);
-        try Netloc.runCron(alloc, user_hash);
-        if (stat.mtime > threshold - std.time.ns_per_s * 20) continue;
-
+        if (try Document.runCron(e.name)) {
+            try bumpMtime(dir, e.name, threshold);
+            continue;
+        }
+        if (try IndexEntry.runCron(alloc, user_hash) or try Netloc.runCron(alloc, user_hash)) {
+            try bumpMtime(dir, e.name, threshold);
+            continue;
+        }
         try dir.deleteFile(e.name);
     }
 }
