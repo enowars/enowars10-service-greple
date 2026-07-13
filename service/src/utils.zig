@@ -80,6 +80,11 @@ test fullMatch {
     try std.testing.expect(!fullMatch(&re, "ab"));
 }
 
+pub const CronState = struct {
+    had_documents: bool = false,
+    had_index_entries_or_netlocs: bool = false,
+};
+
 pub fn HashMap(V: type) type {
     return std.HashMap(Hash, V, struct {
         pub fn hash(_: @This(), k: Hash) u64 {

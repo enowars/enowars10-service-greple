@@ -142,24 +142,41 @@ pub fn runCron(alloc: std.mem.Allocator, threshold: i128) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
 
-    var it = dir.iterateAssumeFirstIteration();
-    while (try it.next()) |e| {
-        if (e.name[0] == '.') continue;
+    var stale: utils.HashMap(utils.CronState) = .init(alloc);
+    defer stale.deinit();
 
-        const stat = try dir.statFile(e.name);
-        if (stat.mtime > threshold) continue;
-
-        const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
-
-        if (try Document.runCron(e.name)) {
-            try bumpMtime(dir, e.name, threshold);
-            continue;
+    {
+        var it = dir.iterateAssumeFirstIteration();
+        while (try it.next()) |e| {
+            if (e.name[0] == '.') continue;
+            const stat = try dir.statFile(e.name);
+            if (stat.mtime > threshold) continue;
+            const user_hash = try utils.hexToBytes(@sizeOf(utils.Hash), e.name);
+            try stale.put(user_hash, .{});
         }
-        if (try IndexEntry.runCron(alloc, user_hash) or try Netloc.runCron(alloc, user_hash)) {
-            try bumpMtime(dir, e.name, threshold);
-            continue;
+    }
+
+    {
+        var it = stale.iterator();
+        while (it.next()) |entry| {
+            const user_hash_hex = std.fmt.bytesToHex(entry.key_ptr.*, .lower);
+            if (try Document.runCron(&user_hash_hex)) entry.value_ptr.had_documents = true;
         }
-        try dir.deleteFile(e.name);
+    }
+
+    try IndexEntry.runCronSweep(alloc, &stale);
+    try Netloc.runCronSweep(alloc, &stale);
+
+    {
+        var it = stale.iterator();
+        while (it.next()) |entry| {
+            const user_hash_hex = std.fmt.bytesToHex(entry.key_ptr.*, .lower);
+            if (entry.value_ptr.had_documents or entry.value_ptr.had_index_entries_or_netlocs) {
+                try bumpMtime(dir, &user_hash_hex, threshold);
+            } else {
+                try dir.deleteFile(&user_hash_hex);
+            }
+        }
     }
 }
 

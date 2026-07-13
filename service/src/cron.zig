@@ -34,7 +34,7 @@ pub fn main() !void {
         std.log.info("cron run took {d}s", .{@as(f64, @floatFromInt(elapsed)) / std.time.ns_per_s});
 
         const step_ns = std.time.ns_per_s;
-        var remaining: u64 = std.time.ns_per_min;
+        var remaining: u64 = std.time.ns_per_s * 12;
         while (remaining > 0 and running) {
             const chunk = @min(remaining, step_ns);
             std.Thread.sleep(chunk);

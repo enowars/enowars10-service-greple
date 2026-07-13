@@ -104,20 +104,19 @@ pub fn hash(self: *const @This()) utils.Hash {
     return utils.hash(&self.user_hash ++ &self.url.hash());
 }
 
-pub fn runCron(alloc: std.mem.Allocator, user_hash: utils.Hash) !bool {
+pub fn runCronSweep(alloc: std.mem.Allocator, stale: *utils.HashMap(utils.CronState)) !void {
     var dir = try openDir(.{ .iterate = true });
     defer dir.close();
-    var deleted = false;
     var it = dir.iterateAssumeFirstIteration();
     while (try it.next()) |e| {
         if (e.name[0] == '.') continue;
         var index_entry = try getFromDir(alloc, dir, e.name);
         defer index_entry.deinit(alloc);
-        if (!std.mem.eql(u8, &user_hash, &index_entry.user_hash)) continue;
+        const state = stale.getPtr(index_entry.user_hash) orelse continue;
+        if (state.had_documents) continue;
         try dir.deleteFile(e.name);
-        deleted = true;
+        state.had_index_entries_or_netlocs = true;
     }
-    return deleted;
 }
 
 pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
