@@ -36,3 +36,9 @@ services:
       nproc:
         soft: 4000
         hard: 4000
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1420
