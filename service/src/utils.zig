@@ -164,27 +164,28 @@ pub const Writer = struct {
     writer: std.fs.File.Writer,
 
     pub fn open(dir: std.fs.Dir, name: []const u8) !@This() {
-        std.debug.assert(name.len >= 16);
-        var tmp_name: [17]u8 = undefined;
-        tmp_name[0] = '.';
-        @memcpy(tmp_name[1..], name[0..16]);
+        while (true) {
+            var tmp_name: [17]u8 = undefined;
+            tmp_name[0] = '.';
+            @memcpy(tmp_name[1..], &std.fmt.hex(std.crypto.random.int(u64)));
 
-        const file = dir.createFile(&tmp_name, .{ .exclusive = true }) catch |err| switch (err) {
-            std.fs.File.OpenError.PathAlreadyExists => return error.WriteAlreadyInProgress,
-            else => |leftover_err| return leftover_err,
-        };
-        errdefer {
-            file.close();
-            dir.deleteFile(tmp_name) catch {};
+            const file = dir.createFile(&tmp_name, .{ .exclusive = true }) catch |err| switch (err) {
+                std.fs.File.OpenError.PathAlreadyExists => continue,
+                else => |leftover_err| return leftover_err,
+            };
+            errdefer {
+                file.close();
+                dir.deleteFile(&tmp_name) catch {};
+            }
+
+            return .{
+                .dir = dir,
+                .name = name,
+                .tmp_name = tmp_name,
+                .file = file,
+                .writer = file.writer(&.{}),
+            };
         }
-
-        return .{
-            .dir = dir,
-            .name = name,
-            .tmp_name = tmp_name,
-            .file = file,
-            .writer = file.writer(&.{}),
-        };
     }
 
     pub fn interface(self: *@This()) *std.Io.Writer {
