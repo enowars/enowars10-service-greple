@@ -50,12 +50,25 @@ class Client(httpx.AsyncClient):
             self.last_response.request.method,
             self.last_response.request.url,
         )
+        if self.last_response.request.method == "POST":
+            self._logger.info(
+                "Last request body was %r",
+                self.last_response.request.content,
+            )
         self._logger.info(
-            "Last response was %d %s %r",
+            "Last response was %d %s",
             self.last_response.status_code,
             self.last_response.reason_phrase,
-            self.last_response.text,
         )
+        self._logger.info(
+            "Last response body was %r",
+            self.last_response.content,
+        )
+        for value in self.last_response.headers.get_list("set-cookie"):
+            self._logger.info(
+                "Last response Set-Cookie: %s",
+                value,
+            )
         if (
             type(exc_value) is MumbleException
             and exc_value.message is not None
