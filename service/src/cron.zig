@@ -37,7 +37,7 @@ pub fn main() !void {
         );
 
         const step_ns = std.time.ns_per_s;
-        var remaining: u64 = std.time.ns_per_s * 12;
+        var remaining: u64 = std.time.ns_per_s * 10;
         while (remaining > 0 and running) {
             const chunk = @min(remaining, step_ns);
             std.Thread.sleep(chunk);
