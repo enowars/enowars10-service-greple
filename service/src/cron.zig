@@ -31,7 +31,10 @@ pub fn main() !void {
         try ShortUrl.runCron(threshold);
 
         const elapsed = std.time.nanoTimestamp() - start;
-        std.log.info("cron run took {d}s", .{@as(f64, @floatFromInt(elapsed)) / std.time.ns_per_s});
+        if (elapsed > std.time.ns_per_s) std.log.info(
+            "cron took {d}ms",
+            .{@divFloor(elapsed, std.time.ns_per_ms)},
+        );
 
         const step_ns = std.time.ns_per_s;
         var remaining: u64 = std.time.ns_per_s * 12;
