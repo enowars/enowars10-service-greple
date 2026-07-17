@@ -105,10 +105,6 @@ fn isAddressSafe(address: std.net.Address) bool {
     if (std.mem.asBytes(&address.in.sa.addr)[3] % 255 == 0) return false;
     if (address.getPort() < 1024 or address.getPort() > 9999) return false;
     if (std.mem.asBytes(&address.in.sa.addr)[0] == 10) return true;
-    // TODO: remove VVVVV
-    if (std.mem.asBytes(&address.in.sa.addr)[0] == 91 and std.mem.asBytes(&address.in.sa.addr)[1] == 99) return true;
-    if (std.mem.asBytes(&address.in.sa.addr)[0] == 172) return true;
-    // TODO: ^^^^^^^^^^^^
     return false;
 }
 
@@ -210,7 +206,6 @@ pub const Connection = struct {
         self.queue.consume();
 
         if (self.queue.isEmpty()) {
-            // TODO: free memory
             self.request = null;
             if (self.conn) |c| {
                 fio_close(c.uuid);
@@ -246,7 +241,6 @@ pub const Connection = struct {
         if (self.conn) |c| {
             for (address_list.addrs) |b| if (c.addr.eql(b)) return self.sendRequest();
 
-            // TODO: destroy http1?
             self.request = null;
             fio_close(c.uuid);
             self.conn = null;
@@ -410,7 +404,6 @@ pub const Connection = struct {
             },
         }
 
-        // TODO: don't use, as it sends date and last-modified on a request???
         zap.fio.http_finish(self.request.?);
     }
 };
