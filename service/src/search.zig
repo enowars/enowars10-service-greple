@@ -7,6 +7,42 @@ const Url = @import("Url.zig");
 const User = @import("User.zig");
 const utils = @import("utils.zig");
 
+const c = @cImport({
+    @cInclude("spawn.h");
+    @cInclude("unistd.h");
+    @cInclude("sys/wait.h");
+});
+
+fn spawnGrep(pattern: [*:0]const u8, cwd: std.fs.Dir, pipe_r: std.posix.fd_t, pipe_w: std.posix.fd_t) !std.posix.pid_t {
+    var fa: c.posix_spawn_file_actions_t = undefined;
+    if (c.posix_spawn_file_actions_init(&fa) != 0) return error.SpawnFailed;
+    defer _ = c.posix_spawn_file_actions_destroy(&fa);
+
+    if (c.posix_spawn_file_actions_adddup2(&fa, pipe_w, std.posix.STDOUT_FILENO) != 0) return error.SpawnFailed;
+    if (c.posix_spawn_file_actions_addclose(&fa, pipe_w) != 0) return error.SpawnFailed;
+    if (c.posix_spawn_file_actions_addclose(&fa, pipe_r) != 0) return error.SpawnFailed;
+    if (c.posix_spawn_file_actions_addfchdir_np(&fa, cwd.fd) != 0) return error.SpawnFailed;
+
+    var attr: c.posix_spawnattr_t = undefined;
+    if (c.posix_spawnattr_init(&attr) != 0) return error.SpawnFailed;
+    defer _ = c.posix_spawnattr_destroy(&attr);
+    if (c.posix_spawnattr_setflags(&attr, c.POSIX_SPAWN_USEVFORK) != 0) return error.SpawnFailed;
+
+    var argv = [_:null]?[*:0]const u8{ "/bin/grep", "-ri", pattern, ".", null };
+
+    var pid: c.pid_t = undefined;
+    if (c.posix_spawn(
+        &pid,
+        "/bin/grep",
+        &fa,
+        &attr,
+        @ptrCast(&argv),
+        @ptrCast(std.c.environ),
+    ) != 0) return error.SpawnFailed;
+
+    return pid;
+}
+
 fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
     var cwd = try Document.openDir();
     defer cwd.close();
@@ -20,15 +56,39 @@ fn performGrep(alloc: std.mem.Allocator, query: *const Query) ![]const u8 {
         cwd = subdir;
     }
 
-    const result = try std.process.Child.run(.{
-        .allocator = alloc,
-        .argv = &.{ "/bin/grep", "-ri", query.pattern, "." },
-        .cwd_dir = cwd,
-        .max_output_bytes = std.math.maxInt(usize),
-    });
-    alloc.free(result.stderr);
+    const fds = try std.posix.pipe2(.{ .CLOEXEC = true });
+    const pipe_r = fds[0];
+    const pipe_w = fds[1];
+    var pipe_r_open = true;
+    errdefer if (pipe_r_open) std.posix.close(pipe_r);
 
-    return result.stdout;
+    const pid = spawnGrep(query.pattern, cwd, pipe_r, pipe_w) catch |err| {
+        std.posix.close(pipe_w);
+        return err;
+    };
+    errdefer {
+        if (pipe_r_open) std.posix.close(pipe_r);
+        pipe_r_open = false;
+        _ = std.posix.waitpid(pid, 0);
+    }
+
+    std.posix.close(pipe_w);
+
+    var stdout: std.ArrayList(u8) = .empty;
+    errdefer stdout.deinit(alloc);
+
+    var buffer: [64 * 1024]u8 = undefined;
+    var reader = (std.fs.File{ .handle = pipe_r }).reader(&buffer);
+    reader.interface.appendRemaining(alloc, &stdout, .unlimited) catch |err| switch (err) {
+        error.ReadFailed => return reader.err.?,
+        else => |leftover_err| return leftover_err,
+    };
+    std.posix.close(pipe_r);
+    pipe_r_open = false;
+
+    _ = std.posix.waitpid(pid, 0);
+
+    return stdout.toOwnedSlice(alloc);
 }
 
 const Result = struct {

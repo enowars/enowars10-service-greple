@@ -58,6 +58,16 @@ extern fn fio_malloc(size: usize) ?*anyopaque;
 extern fn http1_vtable() *anyopaque;
 extern fn fio_close(isize) void;
 
+fn fio_uuid2fd(uuid: isize) std.posix.fd_t {
+    return @intCast(@as(usize, @bitCast(uuid)) >> 8);
+}
+
+fn setCloExec(uuid: isize) !void {
+    const fd = fio_uuid2fd(uuid);
+    const flags = try std.posix.fcntl(fd, std.posix.F.GETFD, 0);
+    _ = try std.posix.fcntl(fd, std.posix.F.SETFD, flags | std.posix.FD_CLOEXEC);
+}
+
 fn on_response(response: *zap.fio.http_s) callconv(.c) void {
     const connection: *Connection = @ptrCast(@alignCast(response.udata.?));
     connection.onResponse(response);
@@ -259,6 +269,8 @@ pub const Connection = struct {
                 .timeout = 0,
             });
             if (uuid < 0) return self.onError(error.OpeningConnectionFailed, false);
+
+            setCloExec(uuid) catch return self.onError(error.OpeningConnectionFailed, false);
 
             self.conn = .{ .addr = a, .uuid = uuid };
             return;

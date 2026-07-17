@@ -18,7 +18,7 @@ const re_prefix = "\\(^\\|\\W\\)";
 const re_sep = "\\W\\+";
 const re_suffix = "\\(\\W\\|$\\)";
 
-pattern: []const u8,
+pattern: [:0]const u8,
 user_hash: ?utils.Hash,
 
 pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
@@ -56,7 +56,7 @@ pub fn init(alloc: std.mem.Allocator, q: []const u8) !?@This() {
     if (!first) try pattern.appendSlice(alloc, re_suffix);
 
     return .{
-        .pattern = try pattern.toOwnedSlice(alloc),
+        .pattern = try pattern.toOwnedSliceSentinel(alloc, 0),
         .user_hash = user_hash,
     };
 }
