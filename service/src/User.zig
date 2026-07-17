@@ -67,7 +67,7 @@ pub fn getFromCookie(alloc: std.mem.Allocator, req: *const zap.Request) !?@This(
                     username = std.Uri.percentDecodeInPlace(try alloc.dupe(u8, v));
                 } else if (std.mem.eql(u8, k, "hmac")) {
                     if (hmac) |_| return error.InvalidUserAccountCookie;
-                    hmac = utils.hexToBytes(@sizeOf(utils.Hmac), v) catch return error.InvalidUserAccountCookiel;
+                    hmac = utils.hexToBytes(@sizeOf(utils.Hmac), v) catch return error.InvalidUserAccountCookie;
                 } else {
                     return error.InvalidUserAccountCookie;
                 }
