@@ -542,7 +542,7 @@ pub fn main() !void {
         .on_request = Handler.innerHandleRequest,
     });
     try listener.listen();
-    zap.start(.{ .workers = 1, .threads = 8 });
+    zap.start(.{ .workers = 1, .threads = 20 });
 }
 
 test {

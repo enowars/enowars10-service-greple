@@ -6,5 +6,5 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
-    cpus: 2
+    cpus: 3
     mem_limit: 2G
