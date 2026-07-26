@@ -333,11 +333,11 @@ pub const SearchConsole = struct {
             \\  </thead>
             \\  <tbody>
         );
-        for (s.entries) |e| try w.print(
+        for (s.entries) |e| if (s.users.get(e.user_hash)) |u| try w.print(
             \\<tr><td>{f}</td><td>{f}</td><td>{s}</td><td><a href="javascript:refresh('{s}')">Refresh</a></td></tr>
         , .{
             e.url,
-            Escape{ .string = s.users.get(e.user_hash).?.username },
+            Escape{ .string = u.username },
             if (e.public) "Yes" else "No",
             std.fmt.bytesToHex(e.hash(), .lower),
         });

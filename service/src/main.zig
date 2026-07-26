@@ -88,7 +88,10 @@ fn getSearchConsole(alloc: std.mem.Allocator, req: *const zap.Request) !void {
     defer alloc.free(entries);
     for (entries) |e| {
         if (!users.contains(e.user_hash)) {
-            const u: User = try .get(alloc, e.user_hash);
+            const u = User.get(alloc, e.user_hash) catch |err| switch (err) {
+                error.FileNotFound => continue,
+                else => |leftover_err| return leftover_err,
+            };
             errdefer user.deinit(alloc);
             try users.putNoClobber(e.user_hash, u);
         }
